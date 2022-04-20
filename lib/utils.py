@@ -3562,7 +3562,7 @@ def func_plot_survival_curves(surv_prob, cs_cif_total, labels, remaining_time_to
 def get_cs_rmft_metric(cs_cif_cum, pred_window = 180, max_time = 700, last_observed_points_oi = None):
 	"""
 	cause specific restricted mean failture time (RMST)
-	precisely this returns expected number of years lost before the end of pred_window
+	precisely this returns expected number of years lost before the end of pred_windows
 	https://bmcmedresmethodol.biomedcentral.com/track/pdf/10.1186/s12874-021-01213-0.pdf
 	"""
 	if last_observed_points_oi is not None:
