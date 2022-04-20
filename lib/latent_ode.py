@@ -14,7 +14,7 @@ import lib.utils as utils
 # from lib.utils import get_device
 from lib.encoder_decoder import *
 from lib.likelihood_eval import *
-from lib.multi_head_attention import *
+# from lib.multi_head_attention import *
 
 from torch.distributions.multivariate_normal import MultivariateNormal
 from torch.distributions.normal import Normal

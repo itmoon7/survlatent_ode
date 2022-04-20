@@ -25,7 +25,8 @@ from tqdm import tqdm
 from lifelines.utils import concordance_index
 from lib.likelihood_eval import *
 # from sksurv.metrics import cumulative_dynamic_auc, concordance_index_ipcw #integrated_brier_score, brier_score
-from lib.nonparametric import CensoringDistributionEstimator, SurvivalFunctionEstimator
+# from lib.nonparametric import CensoringDistributionEstimator, SurvivalFunctionEstimator
+from sksurv.metrics import concordance_index_ipcw, brier_score, cumulative_dynamic_auc, integrated_brier_score
 from sklearn.utils import check_consistent_length, check_array
 from sklearn.impute import SimpleImputer
 from sklearn import model_selection
@@ -39,692 +40,692 @@ import itertools
 """
 Exported from skysurv package
 """
-def get_max_cs_cif(cs_cif_total):
-	cs_cif_max_dvt = []
-	for cs_cif_oi in cs_cif_total[0]:
-		cs_cif_max_dvt.append(np.max(cs_cif_oi))
-	# print('max cs-cif (DVT) : ', np.max(cs_cif_max))
+# def get_max_cs_cif(cs_cif_total):
+# 	cs_cif_max_dvt = []
+# 	for cs_cif_oi in cs_cif_total[0]:
+# 		cs_cif_max_dvt.append(np.max(cs_cif_oi))
+# 	# print('max cs-cif (DVT) : ', np.max(cs_cif_max))
 
-	cs_cif_max_death = []
-	for cs_cif_oi in cs_cif_total[1]:
-		cs_cif_max_death.append(np.max(cs_cif_oi))
-	# print('max cs-cif (Death) : ', np.max(cs_cif_max))
-	return np.max(cs_cif_max_dvt), np.max(cs_cif_max_death)
+# 	cs_cif_max_death = []
+# 	for cs_cif_oi in cs_cif_total[1]:
+# 		cs_cif_max_death.append(np.max(cs_cif_oi))
+# 	# print('max cs-cif (Death) : ', np.max(cs_cif_max))
+# 	return np.max(cs_cif_max_dvt), np.max(cs_cif_max_death)
 
-def _check_estimate_1d(estimate, test_time):
-	estimate = check_array(estimate, ensure_2d=False)
-	if estimate.ndim != 1:
-		raise ValueError(
-			'Expected 1D array, got {:d}D array instead:\narray={}.\n'.format(
-				estimate.ndim, estimate))
-	check_consistent_length(test_time, estimate)
-	return estimate
+# def _check_estimate_1d(estimate, test_time):
+# 	estimate = check_array(estimate, ensure_2d=False)
+# 	if estimate.ndim != 1:
+# 		raise ValueError(
+# 			'Expected 1D array, got {:d}D array instead:\narray={}.\n'.format(
+# 				estimate.ndim, estimate))
+# 	check_consistent_length(test_time, estimate)
+# 	return estimate
 	
-def concordance_index_ipcw(survival_train, survival_test, estimate, tau=None, tied_tol=1e-8, ipcw_weights = True):
-	"""Concordance index for right-censored data based on inverse probability of censoring weights.
-
-	This is an alternative to the estimator in :func:`concordance_index_censored`
-	that does not depend on the distribution of censoring times in the test data.
-	Therefore, the estimate is unbiased and consistent for a population concordance
-	measure that is free of censoring.
-
-	It is based on inverse probability of censoring weights, thus requires
-	access to survival times from the training data to estimate the censoring
-	distribution. Note that this requires that survival times `survival_test`
-	lie within the range of survival times `survival_train`. This can be
-	achieved by specifying the truncation time `tau`.
-	The resulting `cindex` tells how well the given prediction model works in
-	predicting events that occur in the time range from 0 to `tau`.
-
-	The estimator uses the Kaplan-Meier estimator to estimate the
-	censoring survivor function. Therefore, it is restricted to
-	situations where the random censoring assumption holds and
-	censoring is independent of the features.
-
-	See the :ref:`User Guide </user_guide/evaluating-survival-models.ipynb>`
-	and [1]_ for further description.
-
-	Parameters
-	----------
-	survival_train : structured array, shape = (n_train_samples,)
-		Survival times for training data to estimate the censoring
-		distribution from.
-		A structured array containing the binary event indicator
-		as first field, and time of event or time of censoring as
-		second field.
-
-	survival_test : structured array, shape = (n_samples,)
-		Survival times of test data.
-		A structured array containing the binary event indicator
-		as first field, and time of event or time of censoring as
-		second field.
-
-	estimate : array-like, shape = (n_samples,)
-		Estimated risk of experiencing an event of test data.
-
-	tau : float, optional
-		Truncation time. The survival function for the underlying
-		censoring time distribution :math:`D` needs to be positive
-		at `tau`, i.e., `tau` should be chosen such that the
-		probability of being censored after time `tau` is non-zero:
-		:math:`P(D > \\tau) > 0`. If `None`, no truncation is performed.
-
-	tied_tol : float, optional, default: 1e-8
-		The tolerance value for considering ties.
-		If the absolute difference between risk scores is smaller
-		or equal than `tied_tol`, risk scores are considered tied.
-
-	Returns
-	-------
-	cindex : float
-		Concordance index
-
-	concordant : int
-		Number of concordant pairs
-
-	discordant : int
-		Number of discordant pairs
-
-	tied_risk : int
-		Number of pairs having tied estimated risks
-
-	tied_time : int
-		Number of comparable pairs sharing the same time
-
-	See also
-	--------
-	concordance_index_censored
-		Simpler estimator of the concordance index.
-
-	References
-	----------
-	.. [1] Uno, H., Cai, T., Pencina, M. J., D’Agostino, R. B., & Wei, L. J. (2011).
-		   "On the C-statistics for evaluating overall adequacy of risk prediction
-		   procedures with censored survival data".
-		   Statistics in Medicine, 30(10), 1105–1117.
-	"""
-	test_event, test_time = check_y_survival(survival_test)
-
-	if tau is not None:
-		mask = test_time < tau
-		survival_test = survival_test[mask]
-
-	estimate = _check_estimate_1d(estimate, test_time)
-
-	if ipcw_weights:
-		cens = CensoringDistributionEstimator()
-		cens.fit(survival_train)
-		ipcw_test = cens.predict_ipcw(survival_test)
-	else:
-		ipcw_test = np.ones(len(survival_test)).astype(float)
-
-	if tau is None:
-		ipcw = ipcw_test
-	else:
-		ipcw = np.empty(estimate.shape[0], dtype=ipcw_test.dtype)
-		ipcw[mask] = ipcw_test
-		ipcw[~mask] = 0
-
-	w = np.square(ipcw)
-
-	return _estimate_concordance_index(test_event, test_time, estimate, w, tied_tol)
-
-def _estimate_concordance_index(event_indicator, event_time, estimate, weights, tied_tol=1e-8):
-	order = np.argsort(event_time)
-
-	comparable, tied_time = _get_comparable(event_indicator, event_time, order)
-
-	if len(comparable) == 0:
-		raise NoComparablePairException(
-			"Data has no comparable pairs, cannot estimate concordance index.")
-
-	concordant = 0
-	discordant = 0
-	tied_risk = 0
-	numerator = 0.0
-	denominator = 0.0
-	for ind, mask in comparable.items():
-		est_i = estimate[order[ind]]
-		event_i = event_indicator[order[ind]]
-		w_i = weights[order[ind]]
-
-		est = estimate[order[mask]]
-
-		assert event_i, 'got censored sample at index %d, but expected uncensored' % order[ind]
-
-		ties = np.absolute(est - est_i) <= tied_tol
-		n_ties = ties.sum()
-		# an event should have a higher score
-		con = est < est_i
-		n_con = con[~ties].sum()
-
-		numerator += w_i * n_con + 0.5 * w_i * n_ties
-		denominator += w_i * mask.sum()
-
-		tied_risk += n_ties
-		concordant += n_con
-		discordant += est.size - n_con - n_ties
-
-	cindex = numerator / denominator
-	return cindex, concordant, discordant, tied_risk, tied_time
-
-def _get_comparable(event_indicator, event_time, order):
-	n_samples = len(event_time)
-	tied_time = 0
-	comparable = {}
-	i = 0
-	while i < n_samples - 1:
-		time_i = event_time[order[i]]
-		start = i + 1
-		end = start
-		while end < n_samples and event_time[order[end]] == time_i:
-			end += 1
-
-		# check for tied event times
-		event_at_same_time = event_indicator[order[i:end]]
-		censored_at_same_time = ~event_at_same_time
-		for j in range(i, end):
-			if event_indicator[order[j]]:
-				mask = np.zeros(n_samples, dtype=bool)
-				mask[end:] = True
-				# an event is comparable to censored samples at same time point
-				mask[i:end] = censored_at_same_time
-				comparable[j] = mask
-				tied_time += censored_at_same_time.sum()
-		i = end
-
-	return comparable, tied_time
-
-def cumulative_dynamic_auc(survival_train, survival_test, estimate, times, tied_tol=1e-8, ipcw_weights = True):
-	"""Estimator of cumulative/dynamic AUC for right-censored time-to-event data.
-
-	The receiver operating characteristic (ROC) curve and the area under the
-	ROC curve (AUC) can be extended to survival data by defining
-	sensitivity (true positive rate) and specificity (true negative rate)
-	as time-dependent measures. *Cumulative cases* are all individuals that
-	experienced an event prior to or at time :math:`t` (:math:`t_i \\leq t`),
-	whereas *dynamic controls* are those with :math:`t_i > t`.
-	The associated cumulative/dynamic AUC quantifies how well a model can
-	distinguish subjects who fail by a given time (:math:`t_i \\leq t`) from
-	subjects who fail after this time (:math:`t_i > t`).
-
-	Given an estimator of the :math:`i`-th individual's risk score
-	:math:`\\hat{f}(\\mathbf{x}_i)`, the cumulative/dynamic AUC at time
-	:math:`t` is defined as
-
-	.. math::
-
-		\\widehat{\\mathrm{AUC}}(t) =
-		\\frac{\\sum_{i=1}^n \\sum_{j=1}^n I(y_j > t) I(y_i \\leq t) \\omega_i
-		I(\\hat{f}(\\mathbf{x}_j) \\leq \\hat{f}(\\mathbf{x}_i))}
-		{(\\sum_{i=1}^n I(y_i > t)) (\\sum_{i=1}^n I(y_i \\leq t) \\omega_i)}
-
-	where :math:`\\omega_i` are inverse probability of censoring weights (IPCW).
-
-	To estimate IPCW, access to survival times from the training data is required
-	to estimate the censoring distribution. Note that this requires that survival
-	times `survival_test` lie within the range of survival times `survival_train`.
-	This can be achieved by specifying `times` accordingly, e.g. by setting
-	`times[-1]` slightly below the maximum expected follow-up time.
-	IPCW are computed using the Kaplan-Meier estimator, which is
-	restricted to situations where the random censoring assumption holds and
-	censoring is independent of the features.
-
-	This function can also be used to evaluate models with time-dependent predictions
-	:math:`\\hat{f}(\\mathbf{x}_i, t)`, such as :class:`sksurv.ensemble.RandomSurvivalForest`
-	(see :ref:`User Guide </user_guide/evaluating-survival-models.ipynb#Using-Time-dependent-Risk-Scores>`).
-	In this case, `estimate` must be a 2-d array where ``estimate[i, j]`` is the
-	predicted risk score for the i-th instance at time point ``times[j]``.
-
-	Finally, the function also provides a single summary measure that refers to the mean
-	of the :math:`\\mathrm{AUC}(t)` over the time range :math:`(\\tau_1, \\tau_2)`.
-
-	.. math::
-
-		\\overline{\\mathrm{AUC}}(\\tau_1, \\tau_2) =
-		\\frac{1}{\\hat{S}(\\tau_1) - \\hat{S}(\\tau_2)}
-		\\int_{\\tau_1}^{\\tau_2} \\widehat{\\mathrm{AUC}}(t)\\,d \\hat{S}(t)
-
-	where :math:`\\hat{S}(t)` is the Kaplan–Meier estimator of the survival function.
-
-	See the :ref:`User Guide </user_guide/evaluating-survival-models.ipynb>`,
-	[1]_, [2]_, [3]_ for further description.
-
-	Parameters
-	----------
-	survival_train : structured array, shape = (n_train_samples,)
-		Survival times for training data to estimate the censoring
-		distribution from.
-		A structured array containing the binary event indicator
-		as first field, and time of event or time of censoring as
-		second field.
-
-	survival_test : structured array, shape = (n_samples,)
-		Survival times of test data.
-		A structured array containing the binary event indicator
-		as first field, and time of event or time of censoring as
-		second field.
-
-	estimate : array-like, shape = (n_samples,) or (n_samples, n_times)
-		Estimated risk of experiencing an event of test data.
-		If `estimate` is a 1-d array, the same risk score across all time
-		points is used. If `estimate` is a 2-d array, the risk scores in the
-		j-th column are used to evaluate the j-th time point.
-
-	times : array-like, shape = (n_times,)
-		The time points for which the area under the
-		time-dependent ROC curve is computed. Values must be
-		within the range of follow-up times of the test data
-		`survival_test`.
-
-	tied_tol : float, optional, default: 1e-8
-		The tolerance value for considering ties.
-		If the absolute difference between risk scores is smaller
-		or equal than `tied_tol`, risk scores are considered tied.
-
-	Returns
-	-------
-	auc : array, shape = (n_times,)
-		The cumulative/dynamic AUC estimates (evaluated at `times`).
-	mean_auc : float
-		Summary measure referring to the mean cumulative/dynamic AUC
-		over the specified time range `(times[0], times[-1])`.
-
-	References
-	----------
-	.. [1] H. Uno, T. Cai, L. Tian, and L. J. Wei,
-		   "Evaluating prediction rules for t-year survivors with censored regression models,"
-		   Journal of the American Statistical Association, vol. 102, pp. 527–537, 2007.
-	.. [2] H. Hung and C. T. Chiang,
-		   "Estimation methods for time-dependent AUC models with survival data,"
-		   Canadian Journal of Statistics, vol. 38, no. 1, pp. 8–26, 2010.
-	.. [3] J. Lambert and S. Chevret,
-		   "Summary measure of discrimination in survival models based on cumulative/dynamic time-dependent ROC curves,"
-		   Statistical Methods in Medical Research, 2014.
-	"""
-	test_event, test_time = check_y_survival(survival_test)
-	estimate, times = _check_estimate_2d(estimate, test_time, times)
-
-	n_samples = estimate.shape[0]
-	n_times = times.shape[0]
-	if estimate.ndim == 1:
-		estimate = np.broadcast_to(estimate[:, np.newaxis], (n_samples, n_times))
-
-	# fit and transform IPCW
-	if ipcw_weights:
-		cens = CensoringDistributionEstimator()
-		cens.fit(survival_train)
-		ipcw = cens.predict_ipcw(survival_test).astype(float)
-	else:
-		# everyone has probability of one
-		# print('IPCW disabled...') 
-		ipcw = np.ones(len(survival_test)).astype(float)
-	# breakpoint()
-
-	# expand arrays to (n_samples, n_times) shape
-	test_time = np.broadcast_to(test_time[:, np.newaxis], (n_samples, n_times))
-	test_event = np.broadcast_to(test_event[:, np.newaxis], (n_samples, n_times))
-	times_2d = np.broadcast_to(times, (n_samples, n_times))
-	ipcw = np.broadcast_to(ipcw[:, np.newaxis], (n_samples, n_times))
-
-	# sort each time point (columns) by risk score (descending)
-	o = np.argsort(-estimate, axis=0)
-	test_time = np.take_along_axis(test_time, o, axis=0)
-	test_event = np.take_along_axis(test_event, o, axis=0)
-	estimate = np.take_along_axis(estimate, o, axis=0)
-	ipcw = np.take_along_axis(ipcw, o, axis=0)
-
-	is_case = (test_time <= times_2d) & test_event
-	is_control = test_time > times_2d
-	n_controls = is_control.sum(axis=0)
-
-	# prepend row of infinity values
-	estimate_diff = np.concatenate((np.broadcast_to(np.infty, (1, n_times)), estimate))
-	is_tied = np.absolute(np.diff(estimate_diff, axis=0)) <= tied_tol
-
-	if ipcw_weights:
-		cumsum_tp = np.cumsum(is_case * ipcw, axis=0)
-	else:
-		cumsum_tp = np.cumsum(is_case, axis=0)
-	# breakpoint()
-	cumsum_fp = np.cumsum(is_control, axis=0)
-	true_pos = cumsum_tp / cumsum_tp[-1]
-	false_pos = cumsum_fp / n_controls
-
-	scores = np.empty(n_times, dtype=float)
-	it = np.nditer((true_pos, false_pos, is_tied), order="F", flags=["external_loop"])
-	with it:
-		for i, (tp, fp, mask) in enumerate(it):
-			idx = np.flatnonzero(mask) - 1
-			# only keep the last estimate for tied risk scores
-			tp_no_ties = np.delete(tp, idx)
-			fp_no_ties = np.delete(fp, idx)
-			# Add an extra threshold position
-			# to make sure that the curve starts at (0, 0)
-			tp_no_ties = np.r_[0, tp_no_ties]
-			fp_no_ties = np.r_[0, fp_no_ties]
-			scores[i] = np.trapz(tp_no_ties, fp_no_ties)
-	# breakpoint()
-	if n_times == 1:
-		mean_auc = scores[0]
-	else:
-		surv = SurvivalFunctionEstimator()
-		surv.fit(survival_test)
-		s_times = surv.predict_proba(times)
-		# compute integral of AUC over survival function
-		d = -np.diff(np.r_[1.0, s_times])
-		integral = (scores * d).sum()
-		mean_auc = integral / (1.0 - s_times[-1])
-
-	return scores, mean_auc
-
-def _check_times(test_time, times):
-	times = check_array(np.atleast_1d(times), ensure_2d=False, dtype=test_time.dtype)
-	times = np.unique(times)
-
-	if times.max() >= test_time.max() or times.min() < test_time.min():
-		raise ValueError(
-			'all times must be within follow-up time of test data: [{}; {}['.format(
-				test_time.min(), test_time.max()))
-
-	return times
-
-def _check_estimate_2d(estimate, test_time, time_points):
-	estimate = check_array(estimate, ensure_2d=False, allow_nd=False)
-	time_points = _check_times(test_time, time_points)
-	check_consistent_length(test_time, estimate)
-
-	if estimate.ndim == 2 and estimate.shape[1] != time_points.shape[0]:
-		raise ValueError("expected estimate with {} columns, but got {}".format(
-			time_points.shape[0], estimate.shape[1]))
-
-	return estimate, time_points
-
-def check_y_survival(y_or_event, *args, allow_all_censored=True):
-	"""Check that array correctly represents an outcome for survival analysis.
-
-	Parameters
-	----------
-	y_or_event : structured array with two fields, or boolean array
-		If a structured array, it must contain the binary event indicator
-		as first field, and time of event or time of censoring as
-		second field. Otherwise, it is assumed that a boolean array
-		representing the event indicator is passed.
-
-	*args : list of array-likes
-		Any number of array-like objects representing time information.
-		Elements that are `None` are passed along in the return value.
-
-	allow_all_censored : bool, optional, default: False
-		Whether to allow all events to be censored.
-
-	Returns
-	-------
-	event : array, shape=[n_samples,], dtype=bool
-		Binary event indicator.
-
-	time : array, shape=[n_samples,], dtype=float
-		Time of event or censoring.
-	"""
-	if len(args) == 0:
-		y = y_or_event
-
-		if not isinstance(y, np.ndarray) or y.dtype.fields is None or len(y.dtype.fields) != 2:
-			raise ValueError('y must be a structured array with the first field'
-							 ' being a binary class event indicator and the second field'
-							 ' the time of the event/censoring')
-
-		event_field, time_field = y.dtype.names
-		y_event = y[event_field]
-		time_args = (y[time_field],)
-	else:
-		y_event = np.asanyarray(y_or_event)
-		time_args = args
-
-	event = check_array(y_event, ensure_2d=False)
-	if not np.issubdtype(event.dtype, np.bool_):
-		raise ValueError('elements of event indicator must be boolean, but found {0}'.format(event.dtype))
-
-	if not (allow_all_censored or np.any(event)):
-		raise ValueError('all samples are censored')
-
-	return_val = [event]
-	for i, yt in enumerate(time_args):
-		if yt is None:
-			return_val.append(yt)
-			continue
-
-		yt = check_array(yt, ensure_2d=False)
-		if not np.issubdtype(yt.dtype, np.number):
-			raise ValueError('time must be numeric, but found {} for argument {}'.format(yt.dtype, i + 2))
-
-		return_val.append(yt)
-
-	return tuple(return_val)
-
-
-def brier_score(survival_train, survival_test, estimate, times, ipcw_weights = True):
-	"""Estimate the time-dependent Brier score for right censored data.
-
-	The time-dependent Brier score is the mean squared error at time point :math:`t`:
-
-	.. math::
-
-		\\mathrm{BS}^c(t) = \\frac{1}{n} \\sum_{i=1}^n I(y_i \\leq t \\land \\delta_i = 1)
-		\\frac{(0 - \\hat{\\pi}(t | \\mathbf{x}_i))^2}{\\hat{G}(y_i)} + I(y_i > t)
-		\\frac{(1 - \\hat{\\pi}(t | \\mathbf{x}_i))^2}{\\hat{G}(t)} ,
-
-	where :math:`\\hat{\\pi}(t | \\mathbf{x})` is the predicted probability of
-	remaining event-free up to time point :math:`t` for a feature vector :math:`\\mathbf{x}`,
-	and :math:`1/\\hat{G}(t)` is a inverse probability of censoring weight, estimated by
-	the Kaplan-Meier estimator.
-
-	See the :ref:`User Guide </user_guide/evaluating-survival-models.ipynb>` and [1]_ for details.
-
-	Parameters
-	----------
-	survival_train : structured array, shape = (n_train_samples,)
-		Survival times for training data to estimate the censoring
-		distribution from.
-		A structured array containing the binary event indicator
-		as first field, and time of event or time of censoring as
-		second field.
-
-	survival_test : structured array, shape = (n_samples,)
-		Survival times of test data.
-		A structured array containing the binary event indicator
-		as first field, and time of event or time of censoring as
-		second field.
-
-	estimate : array-like, shape = (n_samples, n_times)
-		Estimated risk of experiencing an event for test data at `times`.
-		The i-th column must contain the estimated probability of
-		remaining event-free up to the i-th time point.
-
-	times : array-like, shape = (n_times,)
-		The time points for which to estimate the Brier score.
-		Values must be within the range of follow-up times of
-		the test data `survival_test`.
-
-	Returns
-	-------
-	times : array, shape = (n_times,)
-		Unique time points at which the brier scores was estimated.
-
-	brier_scores : array , shape = (n_times,)
-		Values of the brier score.
-
-	Examples
-	--------
-	>>> from sksurv.datasets import load_gbsg2
-	>>> from sksurv.linear_model import CoxPHSurvivalAnalysis
-	>>> from sksurv.metrics import brier_score
-	>>> from sksurv.preprocessing import OneHotEncoder
-
-	Load and prepare data.
-
-	>>> X, y = load_gbsg2()
-	>>> X.loc[:, "tgrade"] = X.loc[:, "tgrade"].map(len).astype(int)
-	>>> Xt = OneHotEncoder().fit_transform(X)
-
-	Fit a Cox model.
-
-	>>> est = CoxPHSurvivalAnalysis(ties="efron").fit(Xt, y)
-
-	Retrieve individual survival functions and get probability
-	of remaining event free up to 5 years (=1825 days).
-
-	>>> survs = est.predict_survival_function(Xt)
-	>>> preds = [fn(1825) for fn in survs]
-
-	Compute the Brier score at 5 years.
-
-	>>> times, score = brier_score(y, y, preds, 1825)
-	>>> print(score)
-	[0.20881843]
-
-	See also
-	--------
-	integrated_brier_score
-
-	References
-	----------
-	.. [1] E. Graf, C. Schmoor, W. Sauerbrei, and M. Schumacher,
-		   "Assessment and comparison of prognostic classification schemes for survival data,"
-		   Statistics in Medicine, vol. 18, no. 17-18, pp. 2529–2545, 1999.
-	"""
-	test_event, test_time = check_y_survival(survival_test)
-	estimate, times = _check_estimate_2d(estimate, test_time, times)
-	if estimate.ndim == 1 and times.shape[0] == 1:
-		estimate = estimate.reshape(-1, 1)
-
-	if ipcw_weights:
-		# fit IPCW estimator
-		cens = CensoringDistributionEstimator().fit(survival_train)
-		# calculate inverse probability of censoring weight at current time point t.
-		prob_cens_t = cens.predict_proba(times)
-		prob_cens_t[prob_cens_t == 0] = np.inf
-		# calculate inverse probability of censoring weights at observed time point
-		prob_cens_y = cens.predict_proba(test_time)
-		prob_cens_y[prob_cens_y == 0] = np.inf
-	else:
-		# print('IPCW disabled')
-		prob_cens_t = np.ones(len(times))
-		prob_cens_y = np.ones(len(test_time))
-	# breakpoint()
-
-	# Calculating the brier scores at each time point
-	brier_scores = np.empty(times.shape[0], dtype=float)
-	for i, t in enumerate(times):
-		est = estimate[:, i]
-		is_case = (test_time <= t) & test_event
-		is_control = test_time > t
-
-		brier_scores[i] = np.mean(np.square(est) * is_case.astype(int) / prob_cens_y
-									 + np.square(1.0 - est) * is_control.astype(int) / prob_cens_t[i])
-
-	# breakpoint()
-	return times, brier_scores
-
-
-def integrated_brier_score(survival_train, survival_test, estimate, times, ipcw_weights = True):
-	"""The Integrated Brier Score (IBS) provides an overall calculation of
-	the model performance at all available times :math:`t_1 \\leq t \\leq t_\\text{max}`.
-
-	The integrated time-dependent Brier score over the interval
-	:math:`[t_1; t_\\text{max}]` is defined as
-
-	.. math::
-
-		\\mathrm{IBS} = \\int_{t_1}^{t_\\text{max}} \\mathrm{BS}^c(t) d w(t)
-
-	where the weighting function is :math:`w(t) = t / t_\\text{max}`.
-	The integral is estimated via the trapezoidal rule.
-
-	See the :ref:`User Guide </user_guide/evaluating-survival-models.ipynb>`
-	and [1]_ for further details.
-
-	Parameters
-	----------
-	survival_train : structured array, shape = (n_train_samples,)
-		Survival times for training data to estimate the censoring
-		distribution from.
-		A structured array containing the binary event indicator
-		as first field, and time of event or time of censoring as
-		second field.
-
-	survival_test : structured array, shape = (n_samples,)
-		Survival times of test data.
-		A structured array containing the binary event indicator
-		as first field, and time of event or time of censoring as
-		second field.
-
-	estimate : array-like, shape = (n_samples, n_times)
-		Estimated risk of experiencing an event for test data at `times`.
-		The i-th column must contain the estimated probability of
-		remaining event-free up to the i-th time point.
-
-	times : array-like, shape = (n_times,)
-		The time points for which to estimate the Brier score.
-		Values must be within the range of follow-up times of
-		the test data `survival_test`.
-
-	Returns
-	-------
-	ibs : float
-		The integrated Brier score.
-
-	Examples
-	--------
-	>>> import np
-	>>> from sksurv.datasets import load_gbsg2
-	>>> from sksurv.linear_model import CoxPHSurvivalAnalysis
-	>>> from sksurv.metrics import integrated_brier_score
-	>>> from sksurv.preprocessing import OneHotEncoder
-
-	Load and prepare data.
-
-	>>> X, y = load_gbsg2()
-	>>> X.loc[:, "tgrade"] = X.loc[:, "tgrade"].map(len).astype(int)
-	>>> Xt = OneHotEncoder().fit_transform(X)
-
-	Fit a Cox model.
-
-	>>> est = CoxPHSurvivalAnalysis(ties="efron").fit(Xt, y)
-
-	Retrieve individual survival functions and get probability
-	of remaining event free from 1 year to 5 years (=1825 days).
-
-	>>> survs = est.predict_survival_function(Xt)
-	>>> times = np.arange(365, 1826)
-	>>> preds = np.asarray([[fn(t) for t in times] for fn in survs])
-
-	Compute the integrated Brier score from 1 to 5 years.
-
-	>>> score = integrated_brier_score(y, y, preds, times)
-	>>> print(score)
-	0.1815853064627424
-
-	See also
-	--------
-	brier_score
-
-	References
-	----------
-	.. [1] E. Graf, C. Schmoor, W. Sauerbrei, and M. Schumacher,
-		   "Assessment and comparison of prognostic classification schemes for survival data,"
-		   Statistics in Medicine, vol. 18, no. 17-18, pp. 2529–2545, 1999.
-	"""
-	# Computing the brier scores
-	times, brier_scores = brier_score(survival_train, survival_test, estimate, times, ipcw_weights = ipcw_weights)
-
-	if times.shape[0] < 2:
-		raise ValueError("At least two time points must be given")
-
-	# Computing the IBS
-	ibs_value = np.trapz(brier_scores, times) / (times[-1] - times[0])
-
-	return ibs_value
+# def concordance_index_ipcw(survival_train, survival_test, estimate, tau=None, tied_tol=1e-8, ipcw_weights = True):
+# 	"""Concordance index for right-censored data based on inverse probability of censoring weights.
+
+# 	This is an alternative to the estimator in :func:`concordance_index_censored`
+# 	that does not depend on the distribution of censoring times in the test data.
+# 	Therefore, the estimate is unbiased and consistent for a population concordance
+# 	measure that is free of censoring.
+
+# 	It is based on inverse probability of censoring weights, thus requires
+# 	access to survival times from the training data to estimate the censoring
+# 	distribution. Note that this requires that survival times `survival_test`
+# 	lie within the range of survival times `survival_train`. This can be
+# 	achieved by specifying the truncation time `tau`.
+# 	The resulting `cindex` tells how well the given prediction model works in
+# 	predicting events that occur in the time range from 0 to `tau`.
+
+# 	The estimator uses the Kaplan-Meier estimator to estimate the
+# 	censoring survivor function. Therefore, it is restricted to
+# 	situations where the random censoring assumption holds and
+# 	censoring is independent of the features.
+
+# 	See the :ref:`User Guide </user_guide/evaluating-survival-models.ipynb>`
+# 	and [1]_ for further description.
+
+# 	Parameters
+# 	----------
+# 	survival_train : structured array, shape = (n_train_samples,)
+# 		Survival times for training data to estimate the censoring
+# 		distribution from.
+# 		A structured array containing the binary event indicator
+# 		as first field, and time of event or time of censoring as
+# 		second field.
+
+# 	survival_test : structured array, shape = (n_samples,)
+# 		Survival times of test data.
+# 		A structured array containing the binary event indicator
+# 		as first field, and time of event or time of censoring as
+# 		second field.
+
+# 	estimate : array-like, shape = (n_samples,)
+# 		Estimated risk of experiencing an event of test data.
+
+# 	tau : float, optional
+# 		Truncation time. The survival function for the underlying
+# 		censoring time distribution :math:`D` needs to be positive
+# 		at `tau`, i.e., `tau` should be chosen such that the
+# 		probability of being censored after time `tau` is non-zero:
+# 		:math:`P(D > \\tau) > 0`. If `None`, no truncation is performed.
+
+# 	tied_tol : float, optional, default: 1e-8
+# 		The tolerance value for considering ties.
+# 		If the absolute difference between risk scores is smaller
+# 		or equal than `tied_tol`, risk scores are considered tied.
+
+# 	Returns
+# 	-------
+# 	cindex : float
+# 		Concordance index
+
+# 	concordant : int
+# 		Number of concordant pairs
+
+# 	discordant : int
+# 		Number of discordant pairs
+
+# 	tied_risk : int
+# 		Number of pairs having tied estimated risks
+
+# 	tied_time : int
+# 		Number of comparable pairs sharing the same time
+
+# 	See also
+# 	--------
+# 	concordance_index_censored
+# 		Simpler estimator of the concordance index.
+
+# 	References
+# 	----------
+# 	.. [1] Uno, H., Cai, T., Pencina, M. J., D’Agostino, R. B., & Wei, L. J. (2011).
+# 		   "On the C-statistics for evaluating overall adequacy of risk prediction
+# 		   procedures with censored survival data".
+# 		   Statistics in Medicine, 30(10), 1105–1117.
+# 	"""
+# 	test_event, test_time = check_y_survival(survival_test)
+
+# 	if tau is not None:
+# 		mask = test_time < tau
+# 		survival_test = survival_test[mask]
+
+# 	estimate = _check_estimate_1d(estimate, test_time)
+
+# 	if ipcw_weights:
+# 		cens = CensoringDistributionEstimator()
+# 		cens.fit(survival_train)
+# 		ipcw_test = cens.predict_ipcw(survival_test)
+# 	else:
+# 		ipcw_test = np.ones(len(survival_test)).astype(float)
+
+# 	if tau is None:
+# 		ipcw = ipcw_test
+# 	else:
+# 		ipcw = np.empty(estimate.shape[0], dtype=ipcw_test.dtype)
+# 		ipcw[mask] = ipcw_test
+# 		ipcw[~mask] = 0
+
+# 	w = np.square(ipcw)
+
+# 	return _estimate_concordance_index(test_event, test_time, estimate, w, tied_tol)
+
+# def _estimate_concordance_index(event_indicator, event_time, estimate, weights, tied_tol=1e-8):
+# 	order = np.argsort(event_time)
+
+# 	comparable, tied_time = _get_comparable(event_indicator, event_time, order)
+
+# 	if len(comparable) == 0:
+# 		raise NoComparablePairException(
+# 			"Data has no comparable pairs, cannot estimate concordance index.")
+
+# 	concordant = 0
+# 	discordant = 0
+# 	tied_risk = 0
+# 	numerator = 0.0
+# 	denominator = 0.0
+# 	for ind, mask in comparable.items():
+# 		est_i = estimate[order[ind]]
+# 		event_i = event_indicator[order[ind]]
+# 		w_i = weights[order[ind]]
+
+# 		est = estimate[order[mask]]
+
+# 		assert event_i, 'got censored sample at index %d, but expected uncensored' % order[ind]
+
+# 		ties = np.absolute(est - est_i) <= tied_tol
+# 		n_ties = ties.sum()
+# 		# an event should have a higher score
+# 		con = est < est_i
+# 		n_con = con[~ties].sum()
+
+# 		numerator += w_i * n_con + 0.5 * w_i * n_ties
+# 		denominator += w_i * mask.sum()
+
+# 		tied_risk += n_ties
+# 		concordant += n_con
+# 		discordant += est.size - n_con - n_ties
+
+# 	cindex = numerator / denominator
+# 	return cindex, concordant, discordant, tied_risk, tied_time
+
+# def _get_comparable(event_indicator, event_time, order):
+# 	n_samples = len(event_time)
+# 	tied_time = 0
+# 	comparable = {}
+# 	i = 0
+# 	while i < n_samples - 1:
+# 		time_i = event_time[order[i]]
+# 		start = i + 1
+# 		end = start
+# 		while end < n_samples and event_time[order[end]] == time_i:
+# 			end += 1
+
+# 		# check for tied event times
+# 		event_at_same_time = event_indicator[order[i:end]]
+# 		censored_at_same_time = ~event_at_same_time
+# 		for j in range(i, end):
+# 			if event_indicator[order[j]]:
+# 				mask = np.zeros(n_samples, dtype=bool)
+# 				mask[end:] = True
+# 				# an event is comparable to censored samples at same time point
+# 				mask[i:end] = censored_at_same_time
+# 				comparable[j] = mask
+# 				tied_time += censored_at_same_time.sum()
+# 		i = end
+
+# 	return comparable, tied_time
+
+# def cumulative_dynamic_auc(survival_train, survival_test, estimate, times, tied_tol=1e-8, ipcw_weights = True):
+# 	"""Estimator of cumulative/dynamic AUC for right-censored time-to-event data.
+
+# 	The receiver operating characteristic (ROC) curve and the area under the
+# 	ROC curve (AUC) can be extended to survival data by defining
+# 	sensitivity (true positive rate) and specificity (true negative rate)
+# 	as time-dependent measures. *Cumulative cases* are all individuals that
+# 	experienced an event prior to or at time :math:`t` (:math:`t_i \\leq t`),
+# 	whereas *dynamic controls* are those with :math:`t_i > t`.
+# 	The associated cumulative/dynamic AUC quantifies how well a model can
+# 	distinguish subjects who fail by a given time (:math:`t_i \\leq t`) from
+# 	subjects who fail after this time (:math:`t_i > t`).
+
+# 	Given an estimator of the :math:`i`-th individual's risk score
+# 	:math:`\\hat{f}(\\mathbf{x}_i)`, the cumulative/dynamic AUC at time
+# 	:math:`t` is defined as
+
+# 	.. math::
+
+# 		\\widehat{\\mathrm{AUC}}(t) =
+# 		\\frac{\\sum_{i=1}^n \\sum_{j=1}^n I(y_j > t) I(y_i \\leq t) \\omega_i
+# 		I(\\hat{f}(\\mathbf{x}_j) \\leq \\hat{f}(\\mathbf{x}_i))}
+# 		{(\\sum_{i=1}^n I(y_i > t)) (\\sum_{i=1}^n I(y_i \\leq t) \\omega_i)}
+
+# 	where :math:`\\omega_i` are inverse probability of censoring weights (IPCW).
+
+# 	To estimate IPCW, access to survival times from the training data is required
+# 	to estimate the censoring distribution. Note that this requires that survival
+# 	times `survival_test` lie within the range of survival times `survival_train`.
+# 	This can be achieved by specifying `times` accordingly, e.g. by setting
+# 	`times[-1]` slightly below the maximum expected follow-up time.
+# 	IPCW are computed using the Kaplan-Meier estimator, which is
+# 	restricted to situations where the random censoring assumption holds and
+# 	censoring is independent of the features.
+
+# 	This function can also be used to evaluate models with time-dependent predictions
+# 	:math:`\\hat{f}(\\mathbf{x}_i, t)`, such as :class:`sksurv.ensemble.RandomSurvivalForest`
+# 	(see :ref:`User Guide </user_guide/evaluating-survival-models.ipynb#Using-Time-dependent-Risk-Scores>`).
+# 	In this case, `estimate` must be a 2-d array where ``estimate[i, j]`` is the
+# 	predicted risk score for the i-th instance at time point ``times[j]``.
+
+# 	Finally, the function also provides a single summary measure that refers to the mean
+# 	of the :math:`\\mathrm{AUC}(t)` over the time range :math:`(\\tau_1, \\tau_2)`.
+
+# 	.. math::
+
+# 		\\overline{\\mathrm{AUC}}(\\tau_1, \\tau_2) =
+# 		\\frac{1}{\\hat{S}(\\tau_1) - \\hat{S}(\\tau_2)}
+# 		\\int_{\\tau_1}^{\\tau_2} \\widehat{\\mathrm{AUC}}(t)\\,d \\hat{S}(t)
+
+# 	where :math:`\\hat{S}(t)` is the Kaplan–Meier estimator of the survival function.
+
+# 	See the :ref:`User Guide </user_guide/evaluating-survival-models.ipynb>`,
+# 	[1]_, [2]_, [3]_ for further description.
+
+# 	Parameters
+# 	----------
+# 	survival_train : structured array, shape = (n_train_samples,)
+# 		Survival times for training data to estimate the censoring
+# 		distribution from.
+# 		A structured array containing the binary event indicator
+# 		as first field, and time of event or time of censoring as
+# 		second field.
+
+# 	survival_test : structured array, shape = (n_samples,)
+# 		Survival times of test data.
+# 		A structured array containing the binary event indicator
+# 		as first field, and time of event or time of censoring as
+# 		second field.
+
+# 	estimate : array-like, shape = (n_samples,) or (n_samples, n_times)
+# 		Estimated risk of experiencing an event of test data.
+# 		If `estimate` is a 1-d array, the same risk score across all time
+# 		points is used. If `estimate` is a 2-d array, the risk scores in the
+# 		j-th column are used to evaluate the j-th time point.
+
+# 	times : array-like, shape = (n_times,)
+# 		The time points for which the area under the
+# 		time-dependent ROC curve is computed. Values must be
+# 		within the range of follow-up times of the test data
+# 		`survival_test`.
+
+# 	tied_tol : float, optional, default: 1e-8
+# 		The tolerance value for considering ties.
+# 		If the absolute difference between risk scores is smaller
+# 		or equal than `tied_tol`, risk scores are considered tied.
+
+# 	Returns
+# 	-------
+# 	auc : array, shape = (n_times,)
+# 		The cumulative/dynamic AUC estimates (evaluated at `times`).
+# 	mean_auc : float
+# 		Summary measure referring to the mean cumulative/dynamic AUC
+# 		over the specified time range `(times[0], times[-1])`.
+
+# 	References
+# 	----------
+# 	.. [1] H. Uno, T. Cai, L. Tian, and L. J. Wei,
+# 		   "Evaluating prediction rules for t-year survivors with censored regression models,"
+# 		   Journal of the American Statistical Association, vol. 102, pp. 527–537, 2007.
+# 	.. [2] H. Hung and C. T. Chiang,
+# 		   "Estimation methods for time-dependent AUC models with survival data,"
+# 		   Canadian Journal of Statistics, vol. 38, no. 1, pp. 8–26, 2010.
+# 	.. [3] J. Lambert and S. Chevret,
+# 		   "Summary measure of discrimination in survival models based on cumulative/dynamic time-dependent ROC curves,"
+# 		   Statistical Methods in Medical Research, 2014.
+# 	"""
+# 	test_event, test_time = check_y_survival(survival_test)
+# 	estimate, times = _check_estimate_2d(estimate, test_time, times)
+
+# 	n_samples = estimate.shape[0]
+# 	n_times = times.shape[0]
+# 	if estimate.ndim == 1:
+# 		estimate = np.broadcast_to(estimate[:, np.newaxis], (n_samples, n_times))
+
+# 	# fit and transform IPCW
+# 	if ipcw_weights:
+# 		cens = CensoringDistributionEstimator()
+# 		cens.fit(survival_train)
+# 		ipcw = cens.predict_ipcw(survival_test).astype(float)
+# 	else:
+# 		# everyone has probability of one
+# 		# print('IPCW disabled...') 
+# 		ipcw = np.ones(len(survival_test)).astype(float)
+# 	# breakpoint()
+
+# 	# expand arrays to (n_samples, n_times) shape
+# 	test_time = np.broadcast_to(test_time[:, np.newaxis], (n_samples, n_times))
+# 	test_event = np.broadcast_to(test_event[:, np.newaxis], (n_samples, n_times))
+# 	times_2d = np.broadcast_to(times, (n_samples, n_times))
+# 	ipcw = np.broadcast_to(ipcw[:, np.newaxis], (n_samples, n_times))
+
+# 	# sort each time point (columns) by risk score (descending)
+# 	o = np.argsort(-estimate, axis=0)
+# 	test_time = np.take_along_axis(test_time, o, axis=0)
+# 	test_event = np.take_along_axis(test_event, o, axis=0)
+# 	estimate = np.take_along_axis(estimate, o, axis=0)
+# 	ipcw = np.take_along_axis(ipcw, o, axis=0)
+
+# 	is_case = (test_time <= times_2d) & test_event
+# 	is_control = test_time > times_2d
+# 	n_controls = is_control.sum(axis=0)
+
+# 	# prepend row of infinity values
+# 	estimate_diff = np.concatenate((np.broadcast_to(np.infty, (1, n_times)), estimate))
+# 	is_tied = np.absolute(np.diff(estimate_diff, axis=0)) <= tied_tol
+
+# 	if ipcw_weights:
+# 		cumsum_tp = np.cumsum(is_case * ipcw, axis=0)
+# 	else:
+# 		cumsum_tp = np.cumsum(is_case, axis=0)
+# 	# breakpoint()
+# 	cumsum_fp = np.cumsum(is_control, axis=0)
+# 	true_pos = cumsum_tp / cumsum_tp[-1]
+# 	false_pos = cumsum_fp / n_controls
+
+# 	scores = np.empty(n_times, dtype=float)
+# 	it = np.nditer((true_pos, false_pos, is_tied), order="F", flags=["external_loop"])
+# 	with it:
+# 		for i, (tp, fp, mask) in enumerate(it):
+# 			idx = np.flatnonzero(mask) - 1
+# 			# only keep the last estimate for tied risk scores
+# 			tp_no_ties = np.delete(tp, idx)
+# 			fp_no_ties = np.delete(fp, idx)
+# 			# Add an extra threshold position
+# 			# to make sure that the curve starts at (0, 0)
+# 			tp_no_ties = np.r_[0, tp_no_ties]
+# 			fp_no_ties = np.r_[0, fp_no_ties]
+# 			scores[i] = np.trapz(tp_no_ties, fp_no_ties)
+# 	# breakpoint()
+# 	if n_times == 1:
+# 		mean_auc = scores[0]
+# 	else:
+# 		surv = SurvivalFunctionEstimator()
+# 		surv.fit(survival_test)
+# 		s_times = surv.predict_proba(times)
+# 		# compute integral of AUC over survival function
+# 		d = -np.diff(np.r_[1.0, s_times])
+# 		integral = (scores * d).sum()
+# 		mean_auc = integral / (1.0 - s_times[-1])
+
+# 	return scores, mean_auc
+
+# def _check_times(test_time, times):
+# 	times = check_array(np.atleast_1d(times), ensure_2d=False, dtype=test_time.dtype)
+# 	times = np.unique(times)
+
+# 	if times.max() >= test_time.max() or times.min() < test_time.min():
+# 		raise ValueError(
+# 			'all times must be within follow-up time of test data: [{}; {}['.format(
+# 				test_time.min(), test_time.max()))
+
+# 	return times
+
+# def _check_estimate_2d(estimate, test_time, time_points):
+# 	estimate = check_array(estimate, ensure_2d=False, allow_nd=False)
+# 	time_points = _check_times(test_time, time_points)
+# 	check_consistent_length(test_time, estimate)
+
+# 	if estimate.ndim == 2 and estimate.shape[1] != time_points.shape[0]:
+# 		raise ValueError("expected estimate with {} columns, but got {}".format(
+# 			time_points.shape[0], estimate.shape[1]))
+
+# 	return estimate, time_points
+
+# def check_y_survival(y_or_event, *args, allow_all_censored=True):
+# 	"""Check that array correctly represents an outcome for survival analysis.
+
+# 	Parameters
+# 	----------
+# 	y_or_event : structured array with two fields, or boolean array
+# 		If a structured array, it must contain the binary event indicator
+# 		as first field, and time of event or time of censoring as
+# 		second field. Otherwise, it is assumed that a boolean array
+# 		representing the event indicator is passed.
+
+# 	*args : list of array-likes
+# 		Any number of array-like objects representing time information.
+# 		Elements that are `None` are passed along in the return value.
+
+# 	allow_all_censored : bool, optional, default: False
+# 		Whether to allow all events to be censored.
+
+# 	Returns
+# 	-------
+# 	event : array, shape=[n_samples,], dtype=bool
+# 		Binary event indicator.
+
+# 	time : array, shape=[n_samples,], dtype=float
+# 		Time of event or censoring.
+# 	"""
+# 	if len(args) == 0:
+# 		y = y_or_event
+
+# 		if not isinstance(y, np.ndarray) or y.dtype.fields is None or len(y.dtype.fields) != 2:
+# 			raise ValueError('y must be a structured array with the first field'
+# 							 ' being a binary class event indicator and the second field'
+# 							 ' the time of the event/censoring')
+
+# 		event_field, time_field = y.dtype.names
+# 		y_event = y[event_field]
+# 		time_args = (y[time_field],)
+# 	else:
+# 		y_event = np.asanyarray(y_or_event)
+# 		time_args = args
+
+# 	event = check_array(y_event, ensure_2d=False)
+# 	if not np.issubdtype(event.dtype, np.bool_):
+# 		raise ValueError('elements of event indicator must be boolean, but found {0}'.format(event.dtype))
+
+# 	if not (allow_all_censored or np.any(event)):
+# 		raise ValueError('all samples are censored')
+
+# 	return_val = [event]
+# 	for i, yt in enumerate(time_args):
+# 		if yt is None:
+# 			return_val.append(yt)
+# 			continue
+
+# 		yt = check_array(yt, ensure_2d=False)
+# 		if not np.issubdtype(yt.dtype, np.number):
+# 			raise ValueError('time must be numeric, but found {} for argument {}'.format(yt.dtype, i + 2))
+
+# 		return_val.append(yt)
+
+# 	return tuple(return_val)
+
+
+# def brier_score(survival_train, survival_test, estimate, times, ipcw_weights = True):
+# 	"""Estimate the time-dependent Brier score for right censored data.
+
+# 	The time-dependent Brier score is the mean squared error at time point :math:`t`:
+
+# 	.. math::
+
+# 		\\mathrm{BS}^c(t) = \\frac{1}{n} \\sum_{i=1}^n I(y_i \\leq t \\land \\delta_i = 1)
+# 		\\frac{(0 - \\hat{\\pi}(t | \\mathbf{x}_i))^2}{\\hat{G}(y_i)} + I(y_i > t)
+# 		\\frac{(1 - \\hat{\\pi}(t | \\mathbf{x}_i))^2}{\\hat{G}(t)} ,
+
+# 	where :math:`\\hat{\\pi}(t | \\mathbf{x})` is the predicted probability of
+# 	remaining event-free up to time point :math:`t` for a feature vector :math:`\\mathbf{x}`,
+# 	and :math:`1/\\hat{G}(t)` is a inverse probability of censoring weight, estimated by
+# 	the Kaplan-Meier estimator.
+
+# 	See the :ref:`User Guide </user_guide/evaluating-survival-models.ipynb>` and [1]_ for details.
+
+# 	Parameters
+# 	----------
+# 	survival_train : structured array, shape = (n_train_samples,)
+# 		Survival times for training data to estimate the censoring
+# 		distribution from.
+# 		A structured array containing the binary event indicator
+# 		as first field, and time of event or time of censoring as
+# 		second field.
+
+# 	survival_test : structured array, shape = (n_samples,)
+# 		Survival times of test data.
+# 		A structured array containing the binary event indicator
+# 		as first field, and time of event or time of censoring as
+# 		second field.
+
+# 	estimate : array-like, shape = (n_samples, n_times)
+# 		Estimated risk of experiencing an event for test data at `times`.
+# 		The i-th column must contain the estimated probability of
+# 		remaining event-free up to the i-th time point.
+
+# 	times : array-like, shape = (n_times,)
+# 		The time points for which to estimate the Brier score.
+# 		Values must be within the range of follow-up times of
+# 		the test data `survival_test`.
+
+# 	Returns
+# 	-------
+# 	times : array, shape = (n_times,)
+# 		Unique time points at which the brier scores was estimated.
+
+# 	brier_scores : array , shape = (n_times,)
+# 		Values of the brier score.
+
+# 	Examples
+# 	--------
+# 	>>> from sksurv.datasets import load_gbsg2
+# 	>>> from sksurv.linear_model import CoxPHSurvivalAnalysis
+# 	>>> from sksurv.metrics import brier_score
+# 	>>> from sksurv.preprocessing import OneHotEncoder
+
+# 	Load and prepare data.
+
+# 	>>> X, y = load_gbsg2()
+# 	>>> X.loc[:, "tgrade"] = X.loc[:, "tgrade"].map(len).astype(int)
+# 	>>> Xt = OneHotEncoder().fit_transform(X)
+
+# 	Fit a Cox model.
+
+# 	>>> est = CoxPHSurvivalAnalysis(ties="efron").fit(Xt, y)
+
+# 	Retrieve individual survival functions and get probability
+# 	of remaining event free up to 5 years (=1825 days).
+
+# 	>>> survs = est.predict_survival_function(Xt)
+# 	>>> preds = [fn(1825) for fn in survs]
+
+# 	Compute the Brier score at 5 years.
+
+# 	>>> times, score = brier_score(y, y, preds, 1825)
+# 	>>> print(score)
+# 	[0.20881843]
+
+# 	See also
+# 	--------
+# 	integrated_brier_score
+
+# 	References
+# 	----------
+# 	.. [1] E. Graf, C. Schmoor, W. Sauerbrei, and M. Schumacher,
+# 		   "Assessment and comparison of prognostic classification schemes for survival data,"
+# 		   Statistics in Medicine, vol. 18, no. 17-18, pp. 2529–2545, 1999.
+# 	"""
+# 	test_event, test_time = check_y_survival(survival_test)
+# 	estimate, times = _check_estimate_2d(estimate, test_time, times)
+# 	if estimate.ndim == 1 and times.shape[0] == 1:
+# 		estimate = estimate.reshape(-1, 1)
+
+# 	if ipcw_weights:
+# 		# fit IPCW estimator
+# 		cens = CensoringDistributionEstimator().fit(survival_train)
+# 		# calculate inverse probability of censoring weight at current time point t.
+# 		prob_cens_t = cens.predict_proba(times)
+# 		prob_cens_t[prob_cens_t == 0] = np.inf
+# 		# calculate inverse probability of censoring weights at observed time point
+# 		prob_cens_y = cens.predict_proba(test_time)
+# 		prob_cens_y[prob_cens_y == 0] = np.inf
+# 	else:
+# 		# print('IPCW disabled')
+# 		prob_cens_t = np.ones(len(times))
+# 		prob_cens_y = np.ones(len(test_time))
+# 	# breakpoint()
+
+# 	# Calculating the brier scores at each time point
+# 	brier_scores = np.empty(times.shape[0], dtype=float)
+# 	for i, t in enumerate(times):
+# 		est = estimate[:, i]
+# 		is_case = (test_time <= t) & test_event
+# 		is_control = test_time > t
+
+# 		brier_scores[i] = np.mean(np.square(est) * is_case.astype(int) / prob_cens_y
+# 									 + np.square(1.0 - est) * is_control.astype(int) / prob_cens_t[i])
+
+# 	# breakpoint()
+# 	return times, brier_scores
+
+
+# def integrated_brier_score(survival_train, survival_test, estimate, times, ipcw_weights = True):
+# 	"""The Integrated Brier Score (IBS) provides an overall calculation of
+# 	the model performance at all available times :math:`t_1 \\leq t \\leq t_\\text{max}`.
+
+# 	The integrated time-dependent Brier score over the interval
+# 	:math:`[t_1; t_\\text{max}]` is defined as
+
+# 	.. math::
+
+# 		\\mathrm{IBS} = \\int_{t_1}^{t_\\text{max}} \\mathrm{BS}^c(t) d w(t)
+
+# 	where the weighting function is :math:`w(t) = t / t_\\text{max}`.
+# 	The integral is estimated via the trapezoidal rule.
+
+# 	See the :ref:`User Guide </user_guide/evaluating-survival-models.ipynb>`
+# 	and [1]_ for further details.
+
+# 	Parameters
+# 	----------
+# 	survival_train : structured array, shape = (n_train_samples,)
+# 		Survival times for training data to estimate the censoring
+# 		distribution from.
+# 		A structured array containing the binary event indicator
+# 		as first field, and time of event or time of censoring as
+# 		second field.
+
+# 	survival_test : structured array, shape = (n_samples,)
+# 		Survival times of test data.
+# 		A structured array containing the binary event indicator
+# 		as first field, and time of event or time of censoring as
+# 		second field.
+
+# 	estimate : array-like, shape = (n_samples, n_times)
+# 		Estimated risk of experiencing an event for test data at `times`.
+# 		The i-th column must contain the estimated probability of
+# 		remaining event-free up to the i-th time point.
+
+# 	times : array-like, shape = (n_times,)
+# 		The time points for which to estimate the Brier score.
+# 		Values must be within the range of follow-up times of
+# 		the test data `survival_test`.
+
+# 	Returns
+# 	-------
+# 	ibs : float
+# 		The integrated Brier score.
+
+# 	Examples
+# 	--------
+# 	>>> import np
+# 	>>> from sksurv.datasets import load_gbsg2
+# 	>>> from sksurv.linear_model import CoxPHSurvivalAnalysis
+# 	>>> from sksurv.metrics import integrated_brier_score
+# 	>>> from sksurv.preprocessing import OneHotEncoder
+
+# 	Load and prepare data.
+
+# 	>>> X, y = load_gbsg2()
+# 	>>> X.loc[:, "tgrade"] = X.loc[:, "tgrade"].map(len).astype(int)
+# 	>>> Xt = OneHotEncoder().fit_transform(X)
+
+# 	Fit a Cox model.
+
+# 	>>> est = CoxPHSurvivalAnalysis(ties="efron").fit(Xt, y)
+
+# 	Retrieve individual survival functions and get probability
+# 	of remaining event free from 1 year to 5 years (=1825 days).
+
+# 	>>> survs = est.predict_survival_function(Xt)
+# 	>>> times = np.arange(365, 1826)
+# 	>>> preds = np.asarray([[fn(t) for t in times] for fn in survs])
+
+# 	Compute the integrated Brier score from 1 to 5 years.
+
+# 	>>> score = integrated_brier_score(y, y, preds, times)
+# 	>>> print(score)
+# 	0.1815853064627424
+
+# 	See also
+# 	--------
+# 	brier_score
+
+# 	References
+# 	----------
+# 	.. [1] E. Graf, C. Schmoor, W. Sauerbrei, and M. Schumacher,
+# 		   "Assessment and comparison of prognostic classification schemes for survival data,"
+# 		   Statistics in Medicine, vol. 18, no. 17-18, pp. 2529–2545, 1999.
+# 	"""
+# 	# Computing the brier scores
+# 	times, brier_scores = brier_score(survival_train, survival_test, estimate, times, ipcw_weights = ipcw_weights)
+
+# 	if times.shape[0] < 2:
+# 		raise ValueError("At least two time points must be given")
+
+# 	# Computing the IBS
+# 	ibs_value = np.trapz(brier_scores, times) / (times[-1] - times[0])
+
+# 	return ibs_value
 
 
 def makedirs(dirname):
@@ -3200,116 +3201,11 @@ def get_ranking_loss(hazards_y, batch_dict, eps = 1e-5, surv_est = None):
 	# 	breakpoint()
 	return torch.stack(ranking_loss, 0).to(get_device(hazards_y)).sum()
 
-def get_survival_likelihood(hazards_y, batch_dict, include_aug_loss = False, eps = 1e-5, surv_est = None, n_events = 1):
+def get_survival_likelihood(hazards_y, batch_dict, include_aug_loss = False, eps = 1e-5, surv_est = None, n_events = 1, event_ratio = 2):
 	"""
-	hazards_y (shape) = [num_traj, samples in batch, time points, 1], which went through sigmoid function 
+	hazards_y (shape) = [num_traj, samples in batch, time points, 1]
 	"""
-	# choose the first traj
-	# soft_out_y = torch.softmax(hazards_y[0], dim = 1)
-	"""
-	The above is wrong because you'd have to softmax from the latest observation since
-	there shouldn't be any prob. mass during the observaiton period
-	"""
-	# soft_out_y = torch.softmax(hazards_y[0, :, 47:, :], dim = 1)
-	"""
-	The above needs to be fixed if an individual has different observation period
-	"""
-	# breakpoint()
-	# masked select 
-	if surv_est == 'Softmax': # learning distribution directly 
-		uncensored_ll = []; censored_ll = []
-		# hazards_oi = hazards_y[0,:,:,:]
-		for hazards_oi, pred_sel, extr_sel in zip(hazards_y[0], batch_dict['mask_surv'], batch_dict['pred_horizon_idx']):
-			# censored
-			soft_out = torch.softmax(hazards_oi[extr_sel[0]:, :], dim = 0)
-			# breakpoint()
-			hazards_oi_sel = torch.masked_select(soft_out.view(-1), pred_sel[extr_sel[0]:].bool())
-			# breakpoint()
-			if hazards_oi_sel.sum().mul(-1).add(1 + eps).log().abs() == np.inf:
-				breakpoint()
-			# print(hazards_oi_sel.sum().mul(-1).add(1 + eps).log())
-			# breakpoint()
-			censored_ll.append(hazards_oi_sel.sum().mul(-1).add(1 + eps).log())
-			# uncensored
-			hazard_at_event = hazards_oi_sel[-1]
-			# hazards_oi_sel = hazards_oi_sel[:-1]
-			if hazard_at_event.log().abs() == np.inf:
-				breakpoint()
-			uncensored_ll.append(hazard_at_event.log())
-			
-		censored_ll = torch.stack(censored_ll, 0).to(get_device(hazards_y))
-		uncensored_ll = torch.stack(uncensored_ll, 0).to(get_device(hazards_y))
-		events = batch_dict['labels'].view(-1)
-		# breakpoint()
-		return (censored_ll.mul(1 - events) + uncensored_ll.mul(events)).sum().mul(-1)
-	elif surv_est == 'Cox':
-		if n_events == 1:
-			f_out_total = hazards_y; event_idx = batch_dict['event_time_idx']; events = batch_dict['labels']; len_time_points = len(batch_dict['tp_to_predict'])
-			# get truncated event idx at len(timpoints)
-			event_idx_trunc = event_idx.clone()
-			event_idx_trunc[event_idx_trunc >= len_time_points - 1] = len_time_points - 1
-
-			# get corresponding log h based on events_idx
-			f_out = f_out_total[:, torch.arange(len(event_idx_trunc)).long(), event_idx_trunc.long(), :]
-
-			# create 1-d array of likelihood in each risk set 
-			risk_set_partial_likelihood = []
-			for idx, event_ in enumerate(event_idx):
-				if event_ >= len_time_points - 1: # event (end-time) after the last observed point, just get the last layer
-					f_out_risk = torch.masked_select(f_out_total[:,:,-1,:].view(-1), (event_idx > event_).bool()) # only get the risk set # here you need to get actual durations ; event idx needs to incorporate ones that live beyond modelled timepoints
-					risk_set_partial_likelihood.append(f_out_risk.exp().sum() + eps)
-				else:
-					# there may be lots of ties 
-					f_out_risk = torch.masked_select(f_out_total[:,:,event_.long(),:].view(-1), (event_idx > event_).bool()) #f_out_total[:,:,event_.long(),:][0] * (event_idx > event_).int()
-					risk_set_partial_likelihood.append(f_out_risk.exp().sum() + eps)
-
-			risk_set_partial_likelihood = torch.cat([val.unsqueeze(0) for val in risk_set_partial_likelihood]).to(get_device(f_out_total))
-			idx = event_idx.sort(descending=False)[1] # should actually be ascending
-			events = events[idx]
-			f_out = f_out[0][idx]
-			risk_set_partial_likelihood = risk_set_partial_likelihood[idx]
-
-			if events.dtype is torch.bool:
-				events = events.float()
-			events = events.view(-1)
-			f_out = f_out.view(-1) # flatten the tensor with a different shape
-			log_risk_set_partial_likelihood = risk_set_partial_likelihood.log()#log_h.sub(gamma).exp().cumsum(0).add(eps).log().add(gamma) 
-			return - f_out.sub(log_risk_set_partial_likelihood).mul(events).sum().div(events.sum())	
-		else:
-			f_out_total = hazards_y; event_idx = batch_dict['event_time_idx']; events = batch_dict['labels']; len_time_points = len(batch_dict['tp_to_predict'])
-			# get truncated event idx at len(timpoints)
-			event_idx_trunc = event_idx.clone()
-			event_idx_trunc[event_idx_trunc >= len_time_points - 1] = len_time_points - 1
-
-			# get corresponding log h based on events_idx
-			f_out = f_out_total[:, torch.arange(len(event_idx_trunc)).long(), event_idx_trunc.long(), :]
-			# breakpoint()
-			# create 1-d array of likelihood in each risk set 
-			risk_set_partial_likelihood = []
-			for idx, event_ in enumerate(event_idx):
-				if event_ >= len_time_points - 1: # event (end-time) after the last observed point, just get the last layer
-					f_out_risk = torch.masked_select(f_out_total[:,:,-1,:].view(-1), (event_idx > event_).bool()) # only get the risk set # here you need to get actual durations ; event idx needs to incorporate ones that live beyond modelled timepoints
-					risk_set_partial_likelihood.append(f_out_risk.exp().sum() + eps)
-				else:
-					# there may be lots of ties 
-					f_out_risk = torch.masked_select(f_out_total[:,:,event_.long(),:].view(-1), (event_idx > event_).bool()) #f_out_total[:,:,event_.long(),:][0] * (event_idx > event_).int()
-					risk_set_partial_likelihood.append(f_out_risk.exp().sum() + eps)
-
-			risk_set_partial_likelihood = torch.cat([val.unsqueeze(0) for val in risk_set_partial_likelihood]).to(get_device(f_out_total))
-			idx = event_idx.sort(descending=False)[1] # should actually be ascending
-			events = events[idx]
-			f_out = f_out[0][idx]
-			risk_set_partial_likelihood = risk_set_partial_likelihood[idx]
-
-			if events.dtype is torch.bool:
-				events = events.float()
-			events = events.view(-1)
-			f_out = f_out.view(-1) # flatten the tensor with a different shape
-			log_risk_set_partial_likelihood = risk_set_partial_likelihood.log()#log_h.sub(gamma).exp().cumsum(0).add(eps).log().add(gamma) 
-			return - f_out.sub(log_risk_set_partial_likelihood).mul(events).sum().div(events.sum())	
-
-
-	elif surv_est == 'Hazard': # estimate hazard using latent hidden state 
+	if surv_est == 'Hazard': 
 		uncensored_ll = []; uncensored_ll_v2 = []; censored_ll = []
 		if n_events == 1:
 			for hazards_oi, pred_sel in zip(hazards_y[0,:,:,:], batch_dict['mask_surv']):
@@ -3320,20 +3216,17 @@ def get_survival_likelihood(hazards_y, batch_dict, include_aug_loss = False, eps
 				hazard_at_event = hazards_oi_sel[-1]
 				hazards_oi_sel_bf_event = hazards_oi_sel[:-1] # orig : hazards_oi_sel = hazards_oi_sel[:-1]
 				# original uncensored loss
-				uncensored_ll.append(hazards_oi_sel_bf_event.mul(-1).add(1 + eps).log().sum().add(hazard_at_event.add(eps).log())) # v1 Ren et al.
+				uncensored_ll.append(hazards_oi_sel_bf_event.mul(-1).add(1 + eps).log().sum().add(hazard_at_event.add(eps).log()))
 				# augmented loss true
-				uncensored_ll_v2.append(hazards_oi_sel.mul(-1).add(1).prod().mul(-1).add(1).log().sum())
-
+				# uncensored_ll_v2.append(hazards_oi_sel.mul(-1).add(1).prod().mul(-1).add(1).log().sum())
 			censored_ll = torch.stack(censored_ll, 0).to(get_device(hazards_y))
 			uncensored_ll = torch.stack(uncensored_ll, 0).to(get_device(hazards_y))
-			uncensored_ll_v2 = torch.stack(uncensored_ll_v2, 0).to(get_device(hazards_y))
+			# uncensored_ll_v2 = torch.stack(uncensored_ll_v2, 0).to(get_device(hazards_y))
 			events = batch_dict['labels'].view(-1)
-			# print('hazard oi max : ', max(hazards_oi_sel))
-			return (censored_ll.mul(1 - events) + (uncensored_ll + uncensored_ll_v2).mul(events)).sum().mul(-1)
+			return (censored_ll.mul(1 - events) + (uncensored_ll).mul(events)).sum().mul(-1)
 		else: # competing events
 			for idx, (label, pred_sel) in enumerate(zip(batch_dict['labels'], batch_dict['mask_surv'])):
-				if label == 0:
-					# censored (contribute surv prob to all outcome decoders)
+				if label == 0: # censored case
 					# hazard per sample
 					hazards_ps = hazards_y[0, :, :, n_events][idx]
 					# select relevant hazard across different risks and sum them up
@@ -3342,185 +3235,72 @@ def get_survival_likelihood(hazards_y, batch_dict, include_aug_loss = False, eps
 					censored_ll.append((hazards_ps_sel + eps).log().sum())
 					int_loss = (hazards_ps_sel + eps).log().sum()
 					if np.isinf(int_loss.cpu().detach().numpy()):
-						breakpoint()
+						raise KeyError('Detect NaN survival loss')
 				else: 
 					# get corresponding hazard based on the label
-					hazards_ps = hazards_y[0, :, :, int(label.cpu().numpy()[0] - 1)][idx] #hazards_y[int(label.cpu().numpy()[0] - 1)][0, :, :, :][idx]
+					hazards_ps = hazards_y[0, :, :, int(label.cpu().numpy()[0] - 1)][idx]
 					hazards_ps_sel = torch.masked_select(hazards_ps.view(-1), pred_sel.bool())
 
-					if len(hazards_ps_sel) == 1: # if a sample survives up to only one time unit, don't include in the loss
+					if len(hazards_ps_sel) == 1:
+						# if a sample survives up to only one time unit, exclude the sample 
 						continue
-					hazard_at_event = hazards_ps_sel[-1] # this shouldn't change
-						
+					hazard_at_event = hazards_ps_sel[-1]
 					hazards_ps_not = hazards_y[0, :, :, n_events][idx]
-					# hazards_ps_sel_not =  1 - \sum_k hazard
 					hazards_ps_sel_not = torch.masked_select(hazards_ps_not.view(-1), pred_sel.bool())
 					hazard_ps_sel_not_bf_event = hazards_ps_sel_not[:-1]
 
 					ll_ind = (hazard_ps_sel_not_bf_event + eps).log().sum().add(hazard_at_event.add(eps).log())# individual likelihood
-					# test 4/9/22 : see if weighting loss depends on the event rate helps
-					uncensored_ll.append(2*ll_ind if label == 1 else ll_ind) # v1 Ren et al.
-					
-					# log cause-specific CIF, we'd like to maximize
-					ll_ind_v2 = (hazards_ps_sel[0] + torch.dot(hazards_ps_sel[1:], torch.cumprod(hazard_ps_sel_not_bf_event, dim = 0))).log()
-					# test 4/9/22 : see if CIF based loss would improve the performance
-					# uncensored_ll_v2.append(4*ll_ind_v2 if label == 1 else ll_ind_v2)
+					uncensored_ll.append(event_ratio*ll_ind if label == 1 else ll_ind) 
 					int_loss = (hazard_ps_sel_not_bf_event + eps).log().sum().add(hazard_at_event.add(eps).log())
 					if np.isinf(int_loss.cpu().detach().numpy()):
-						breakpoint()
+						raise KeyError('Detect NaN survival loss')
 
 			censored_ll = torch.stack(censored_ll, 0).to(get_device(hazards_y[0]))
 			uncensored_ll = torch.stack(uncensored_ll, 0).to(get_device(hazards_y[0]))
-			# uncensored_ll_v2 = torch.stack(uncensored_ll_v2, 0).to(get_device(hazards_y[0]))
-			
-			# loss = (censored_ll.sum() + uncensored_ll.sum() + uncensored_ll_v2.sum()).mul(-1)
 			loss = (censored_ll.sum() + uncensored_ll.sum()).mul(-1)
-			# print('hazard oi max : ', max(hazards_ps))
 			if np.isinf(loss.cpu().detach().numpy()):
-				breakpoint() 
-			# return (censored_ll.sum() + uncensored_ll.sum() + uncensored_ll_v2.sum()).mul(-1) # augmented loss
-			return (censored_ll.sum() + uncensored_ll.sum()).mul(-1)# + uncensored_ll_v2.sum()).mul(-1) # augmented loss
+				raise KeyError('Detect NaN survival loss')
+			return (censored_ll.sum() + uncensored_ll.sum()).mul(-1)
 	else:
-		raise KeyError("Only support survival loss for Softmax and Cox")
+		raise NotImplementedError
 
 def compute_survival_curves(results, batch_dict, batch_dict_train, last_observed_points, surv_est = None, tp_res = 1, max_time_window = None, filename_suffix = None, validation = False, dataset = None, events_info_train_tuple = None, n_events = 1):
 	"""
-	Non-parametrically compute survival prob.
+	Non-parametrically estimate survival prob.
 	"""
 	if surv_est == 'Hazard':
 		if n_events == 1:
 			hazards_y_oi = results['hazards_y'][0]
-			# breakpoint()
 			surv_prob_total = []
 			for hazards_oi, pred_range in zip(hazards_y_oi, batch_dict['pred_horizon_idx']):
 				hazards_oi_sel = hazards_oi[pred_range[0]:].view(-1) 
-				surv_prob = torch.cumprod(hazards_oi_sel.mul(-1.0).add(1.0), dim = 0) # v1 Ren et al.
-				# surv_prob = torch.cumsum(hazards_oi_sel, dim = 0).mul(-1).exp() # v2 approximating survival integral
-				# surv_prob_alt = torch.cumprod(hazards_oi_sel.mul(-1.0).add(1.0), dim = 0)
-				# breakpoint()
+				surv_prob = torch.cumprod(hazards_oi_sel.mul(-1.0).add(1.0), dim = 0)
 				surv_prob_total.append(surv_prob.cpu().detach().numpy())
-			# breakpoint()
 			return np.asarray(surv_prob_total)
-		else: # competing events 
+		else: # multiple events
 			ef_surv_prob = []; cs_cif_total = []
-			# for event_idx, hazards_y_oi_ in enumerate(results['hazards_y']):
 			for event_idx in range(n_events):
-				hazards_y_oi = results['hazards_y'][0] # hazards_y = (1, n_samples, time_points, )
-				# breakpoint()
+				hazards_y_oi = results['hazards_y'][0] 
 				cs_cif_local = []
 				for hazards_oi, pred_range in zip(hazards_y_oi, batch_dict['pred_horizon_idx']):
 					hazards_oi_sel = hazards_oi[pred_range[0]:, n_events].view(-1) 
-					if event_idx == 0: # need to get event free survival probability only once
-						surv_prob = torch.cumprod(hazards_oi_sel, dim = 0)#.exp() # v1 Ren et al.
-						# surv_prob = torch.cumsum(hazards_oi_sel, dim = 0).mul(-1).exp() # v2 approximating survival integral
-						# surv_prob_alt = torch.cumprod(hazards_oi_sel.mul(-1.0).add(1.0), dim = 0)
-						# breakpoint()
+					if event_idx == 0: # event free survival
+						surv_prob = torch.cumprod(hazards_oi_sel, dim = 0)
 						ef_surv_prob.append(surv_prob.cpu().detach().numpy())
-
 					# cause-specific CIF
 					hazards_oi_sel_oi = hazards_oi[pred_range[0]:, event_idx].view(-1) 
 					cs_cif = torch.cumsum(torch.cat((hazards_oi_sel_oi[0][None], hazards_oi_sel_oi[1:] * torch.cumprod(hazards_oi_sel[:-1], dim = 0)), dim = 0), 0)
 					cs_cif_local.append(cs_cif.cpu().detach().numpy())
-
-				# ef_surv_prob_total.append(np.asarray(ef_surv_prob_total_local))
 				cs_cif_total.append(np.asarray(cs_cif_local))
-			# breakpoint()
-			print('\n')
-			cs_cif_max = []
-			for cs_cif_oi in cs_cif_total[0]:
-				cs_cif_max.append(np.max(cs_cif_oi))
-			print('max cs-cif: ', np.max(cs_cif_max))
-			print('\n')
+			# print('\n')
+			# cs_cif_max = []
+			# for cs_cif_oi in cs_cif_total[0]:
+			# 	cs_cif_max.append(np.max(cs_cif_oi))
+			# print('max cs-cif: ', np.max(cs_cif_max))
+			# print('\n')
 			return np.asarray(ef_surv_prob), cs_cif_total
-	elif surv_est == 'Cox':
-		if n_events == 1:
-			f_out_total = results['f_out_cox']
-			if batch_dict_train is not None:
-				event_times_train = batch_dict_train['event_times']
-				events_train = batch_dict_train['labels']	
-			elif events_info_train_tuple is not None:
-				event_times_train = events_info_train_tuple[0]
-				events_train = events_info_train_tuple[1]
-			else:
-				raise KeyError('Provide either batch_dict_train or events_info_train_tuple')
-
-			locally_loaded = 0
-			"""
-			f_out_total [num_traj : 1, num_samples : 100, num_time_points : 500, val : 1]
-			Returning survival probabilities of remaining time-to-event from latest observations
-			"""
-			try: 
-				with open('model_performance/' + filename_suffix + '/base_hazard_t_total_' + dataset + '_validation_' + str(validation) + '_.npy', 'rb') as f:
-					base_hazard_t_total = np.load(f)
-				print('Locally loading baseline hazard...')
-				locally_loaded = 1	
-				time_points_oi = torch.from_numpy(np.asarray([int(val) for val in last_observed_points]))
-			except:
-				base_hazard_t_total = []; #hazard_at_t_total = []
-			result = np.zeros([int((max_time_window - max(last_observed_points))/tp_res), np.shape(f_out_total)[1]]) # shape time points x num samples in test
-			# get the last hidden layer : sort of like proportional hazard model, but depends on the history
-			# just get the latest layer since we're interested in estimating remaining time-to-event given patients covariates
-			f_out_t = f_out_total[0].cpu() # choose traj 
-			exp_f_out_t = [float(val[0]) for val in f_out_t.exp()]
-			reached_non_zero_end = 0
-			# breakpoint()
-			# breakpoint()
-			for t in tqdm(np.arange(0, (max_time_window - max(last_observed_points)).cpu().numpy(), tp_res), desc = 'Computing survival function...'):
-				if locally_loaded:
-					# try:
-					# hazard_at_t = []
-					base_hazard = base_hazard_t_total[int(t/tp_res)] # loaded base hazards start from latest observation for each sample
-					# for idx, t_ in enumerate(last_observed_points): # last observed time across samples
-					# 	# breakpoint()
-					# 	# base_hazard_t = base_hazard_t_total[int(t/tp_res)]
-					# 	partial_hazard_at_t = float(f_out_t[idx, int(t_ + t), :][0].exp())
-					# 	base_hazard_oi = base_hazard[idx]
-					# 	# base_hazard_t.append(base_hazard)
-					# 	hazard_at_t.append(base_hazard_oi * partial_hazard_at_t)
-					# breakpoint()
-					time_points_select = time_points_oi + t
-					# choose corresponding points
-					f_out_t_oi = f_out_t[torch.arange(len(time_points_select)).long(), time_points_select.long(), :].view(-1).exp().cpu().detach().numpy()
-					# torch.index_select(f_out_t, 1, last_observed_points_oi)
-					hazard_at_t = base_hazard * f_out_t_oi
-				else:
-					base_hazard_t = []; hazard_at_t = []
-					for idx, t_ in enumerate(last_observed_points): # last observed time across samples
-						# given training samples under study at time t_, compute baseline hazard 
-						# note that everyone would have a different baseline hazard
-						# note this is a limitation of Cox-based model because you can't make a prediction beyond the longest follow-up time of the training cohort
-						try: 
-							base_hazard = float(events_train[event_times_train == t + int(t_)].sum())/len(event_times_train[event_times_train > t + int(t_)])
-							partial_hazard_at_t = float(f_out_t[idx, int(t_ + t), :][0].exp())
-							base_hazard_t.append(base_hazard)
-							hazard_at_t.append(base_hazard * partial_hazard_at_t)
-						# try:
-						# 	pass
-						except:
-							print('i) reached the end of non-zero denominator for baseline hazard')
-							print('OR')
-							print('ii) reached the end of prediction window for validation set')
-							print('Consider reducing prediction window for (i) or increasing prediction window for (ii)')
-							print('time : ', t + int(t_))
-							# breakpoint()
-							reached_non_zero_end = 1
-							break
-					if reached_non_zero_end:
-						break
-					base_hazard_t_total.append(base_hazard_t)
-					# hazard_at_t_total.append(hazard_at_t)
-				# term_oi = exp_f_out_t * np.asarray(base_hazard_t)
-				result[int(t/tp_res), :] = np.asarray(hazard_at_t)
-
-			if not locally_loaded:
-				with open('model_performance/' + filename_suffix + '/base_hazard_t_total_' + dataset + '_validation_' + str(validation) + '_.npy', 'wb') as f:
-					np.save(f, base_hazard_t_total)
-				print('Locally storing baseline hazard...')
-
-			# returning survival probabilities of remaining time-to-event from latest observations
-			return np.exp(-1 * np.cumsum(result.T, axis = 1))
-		else:
-			pass
+	else:
+		raise NotImplementedError
 
 def scaled_dot_product(q, k, v, mask=None):
 	d_k = q.size()[-1]
@@ -3528,7 +3308,6 @@ def scaled_dot_product(q, k, v, mask=None):
 	attn_logits = attn_logits / math.sqrt(d_k)
 	if mask is not None:
 		attn_logits = attn_logits.masked_fill(mask == 0, -9e15)
-		# breakpoint()
 	attention = F.softmax(attn_logits, dim=-1)
 	values = torch.matmul(attention, v)
 	return values, attention
@@ -3540,11 +3319,7 @@ def divide_list(l, n):
 	return list_split
 
 def evaluate_test_set(df_perf_result, model_info, batch_dict, surv_prob, rec_loss, cs_cif_total = None, run_id = None, min_event_time = 1, max_event_time = 700, tp_res = 1, n_events = 1, evaluate_only = False, filename_hyp_tuning = 'default', dataset = 'general', idx = None, missing_rate = 0.0):
-	"""
-	TODO : competing events vs normal event
-	"""
 	if n_events == 1: # non-competing events:
-
 		if dataset == 'mimic':
 			data_train_tuple = (model_info['events_info_train_tuple'][1], model_info['events_info_train_tuple'][2])
 			data_test_tuple = (batch_dict['labels'], batch_dict['remaining_time_to_event'])
@@ -3730,8 +3505,6 @@ def remove_timepoints_wo_obs(batch_dict):
 	batch_dict["data_to_predict"] = batch_dict["data_to_predict"][:, non_missing_tp_pred]
 	batch_dict["observed_tp_unnorm_dec"] = batch_dict["observed_tp_unnorm"][non_missing_tp_pred]#batch_dict["observed_tp_unnorm"][non_missing_tp_pred]
 	batch_dict["mask_predicted_data"] = batch_dict["mask_predicted_data"][:, non_missing_tp_pred]
-	# batch_dict['non_missing_tp_pred'] = non_missing_tp_pred
-	# breakpoint()
 	return batch_dict
 
 def create_perf_quantile_dict(quant_to_event_oi_train_test_surv_dict):
@@ -3741,10 +3514,6 @@ def create_perf_quantile_dict(quant_to_event_oi_train_test_surv_dict):
 	return quantiles_dict
 
 def func_plot_survival_curves(surv_prob, cs_cif_total, labels, remaining_time_to_event, last_observed_points, n_events = 1, curr_epoch = None, filename_suffix = None):
-	"""
-	surv_prob -> vanilla survival prob in a single-risk
-				 effect free survival in competing risks
-	"""
 	for idx_ in range(n_events):
 		print('Event : ', str(idx_ + 1), ', Plotting 10 random survival curves...')
 		fig, ax = plt.subplots()
@@ -3781,16 +3550,6 @@ def func_plot_survival_curves(surv_prob, cs_cif_total, labels, remaining_time_to
 			t = np.arange(last_obsved_time, last_obsved_time + len(surv), 1) - last_obsved_time
 			ax.plot(t, surv, label = 'Remaining Event time : ' + str(remaining_tte) + ', Event : ' + str(label) + ', Starting time : ' + str(last_obsved_time))# + ', Observed tps : ' + str(observed_tp_for_j))
 			ax.set_ylim([0, 1])
-
-			# if idx_ == 0:
-			# 	surv_total.append(surv)
-
-		# print('\n')
-		# cs_cif_max = []
-		# for cs_cif_oi in cs_cif_total[0]:
-		# 	cs_cif_max.append(np.max(cs_cif_oi))
-		# print('max cs-cif plot : ', np.max(cs_cif_max))
-		# print('\n')
 		
 		ax.set(xlabel='time (hours)', ylabel='Surv Prob' if n_events == 1 else 'CIF')
 		ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.095))
@@ -3804,9 +3563,7 @@ def get_cs_rmft_metric(cs_cif_cum, pred_window = 180, max_time = 700, last_obser
 	"""
 	cause specific restricted mean failture time (RMST)
 	precisely this returns expected number of years lost before the end of pred_window
-	t -> CS RMST
-
-	as pred_window -> infinity, 1 - metric corresponds to the mean survival time
+	https://bmcmedresmethodol.biomedcentral.com/track/pdf/10.1186/s12874-021-01213-0.pdf
 	"""
 	if last_observed_points_oi is not None:
 		try:

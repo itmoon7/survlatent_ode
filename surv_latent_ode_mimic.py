@@ -16,12 +16,7 @@ from datetime import date
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 def main():
-
-	model_num = int(input('Enter a model num (0. LatentODEHazard, 1. LatentODECox) : '))
-	evaluate_only = input('Evaluate only? (Y/N) : ') == 'Y'
-	
-
-	data = pd.read_csv('mimic_data/df_mimic_icu_lab_vals_treats_more_labs_36_hours_no_outliers.csv')  # df_mimic_icu_lab_vals_treats_full_meas.csv, df_mimic_icu_lab_vals_treats_first_48_hours
+	data = pd.read_csv('../neural_ode_surv/mimic_data/df_mimic_icu_lab_vals_treats_more_labs_36_hours_no_outliers.csv')  # df_mimic_icu_lab_vals_treats_full_meas.csv, df_mimic_icu_lab_vals_treats_first_48_hours
 	
 	feat_cat = ['gender']
 	feat_cont = ['age', 'heart rate', 'respiratory rate', 'systolic blood pressure', 'diastolic blood pressure', 'mean blood pressure', 'oxygen saturation', 'temperature', 'glucose', 'central venous pressure', 'hematocrit', 'potassium', 'sodium', 'pulmonary artery pressure systolic', 'ph', 'hemoglobin', 'chloride', 'co2 (etco2, pco2, etc.)', 'partial pressure of carbon dioxide', 'creatinine', 'blood urea nitrogen', 'bicarbonate', 'platelets', 'anion gap', 'white blood cell count', 'magnesium', 'positive end-expiratory pressure set', 'calcium', 'tidal volume observed', 'partial thromboplastin time', 'red blood cell count', 'mean corpuscular volume', 'prothrombin time inr', 'prothrombin time pt', 'fraction inspired oxygen set', 'peak inspiratory pressure', 'calcium ionized', 'phosphate', 'respiratory rate set', 'phosphorous', 'tidal volume set']
@@ -37,27 +32,23 @@ def main():
 	print('feat dimension : ', feats_dim)
 	reconstr_dim = len(feat_reconstr)
 
-	batch_size=100; gen_layers=7; latent_dim=40; lr=0.01; rec_dim=50; rec_layers=5; survival_loss_scale=100; units_gru=80; units_ode=70; wait_until_full_surv_loss=3;
+	batch_size=100; gen_layers=7; latent_dim=40; lr=0.01; rec_dim=50; rec_layers=5; mult_event_units=5; num_layer_hazard_dec=3; survival_loss_scale=100; units_gru=80; units_ode=70; wait_until_full_surv_loss=3;
 
 	n_latent_traj = 1 # number of sampled trajectories
 	max_time = 600; n_samples = 30000; niters = 30; 
 	include_test_set = True # include test set as a part of the main data pre-processing
 	early_stopping = True; check_extrapolation = True; dataset = 'mimic'
 
-	
-	survival_loss_exp = True if model_num == 0 else False # in Cox don't apply exponential growth of surv loss
-
-	model = LatentODEHazard(input_dim = feats_dim, reconstr_dim = reconstr_dim, latent_dim = latent_dim, rec_dim = rec_dim, rec_layers = rec_layers, 
-				 		 	gen_layers = gen_layers, units_ode = units_ode, units_gru = units_gru, device = DEVICE, n_events = n_events)
+	model = SurvLatentODE(input_dim = feats_dim, reconstr_dim = reconstr_dim, latent_dim = latent_dim, rec_dim = rec_dim, rec_layers = rec_layers, 
+				 		  gen_layers = gen_layers, units_ode = units_ode, units_gru = units_gru, device = DEVICE, n_events = n_events)
 	
 	"""
 	Select run_id
 	"""
-	# ================================================================
-	run_id = 'mimic_data_train_test_valid_365' # 3_survlatent_v1_2_13_niter_50, 7_survlatent_v3_2_13_niter_50, 15_latent_hazard_full_v2_treat_reconstr_subset, mimic_model_v1_max_600
+	run_id = 'mimic_data_train_test_valid_365' 
 	
-	if not evaluate_only:
-		model.fit(data, data_info_dic, n_samples = n_samples, max_time = max_time, run_id = run_id, niters = niters, batch_size = batch_size, include_test_set = include_test_set, survival_loss_scale = survival_loss_scale, early_stopping = early_stopping, survival_loss_exp = survival_loss_exp, feat_reconstr = feat_reconstr, dataset= dataset, wait_until_full_surv_loss = wait_until_full_surv_loss, check_extrapolation = check_extrapolation)
+	# if not evaluate_only:
+	model.fit(data, data_info_dic, n_samples = n_samples, max_time = max_time, run_id = run_id, niters = niters, batch_size = batch_size, include_test_set = include_test_set, survival_loss_scale = survival_loss_scale, early_stopping = early_stopping, feat_reconstr = feat_reconstr, dataset= dataset, wait_until_full_surv_loss = wait_until_full_surv_loss, check_extrapolation = check_extrapolation)
 
 	# load model
 	print('\n')
@@ -88,10 +79,10 @@ def main():
 		warnings.simplefilter("ignore")
 		if n_events == 1:
 			df_perf_result = pd.DataFrame([], index = np.arange(100), columns = ['run_id', 'params', 'best_epoch', 'reconstr_loss', 'mean_auc', 'mean_c_idx', 'mean_bs'])
-			df_perf_result = evaluate_test_set(df_perf_result, model_info, batch_dict, surv_prob, rec_loss, run_id = run_id, evaluate_only = evaluate_only, max_event_time = max_time, dataset = dataset, idx = idx)
+			df_perf_result = evaluate_test_set(df_perf_result, model_info, batch_dict, surv_prob, rec_loss, run_id = run_id, max_event_time = max_time, dataset = dataset, idx = idx)
 		else:
 			df_perf_result = pd.DataFrame([], index = np.arange(100), columns = ['run_id', 'params', 'best_epoch', 'reconstr_loss', 'mean_auc_1', 'mean_c_idx_1', 'mean_bs_ef', 'mean_auc_2', 'mean_c_idx_2'])
-			df_perf_result = evaluate_test_set(df_perf_result, model_info, batch_dict, ef_surv_prob, rec_loss, cs_cif_total = cs_cif_total, run_id = run_id, n_events = n_events, evaluate_only = evaluate_only, max_event_time = max_time, dataset = dataset, idx = idx)
+			df_perf_result = evaluate_test_set(df_perf_result, model_info, batch_dict, ef_surv_prob, rec_loss, cs_cif_total = cs_cif_total, run_id = run_id, n_events = n_events, max_event_time = max_time, dataset = dataset, idx = idx)
 
 	"""
 	=====================================================================================
