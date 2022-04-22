@@ -1,6 +1,9 @@
-###########################
+####################################################
+# SurvLatent ODE
+# Author : Intae Moon
+#
 # Partially adpated from Latent ODEs for Irregularly-Sampled Time Series (Rubanova et al. 2019)
-###########################
+####################################################
 
 import os
 import logging

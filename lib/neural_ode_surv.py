@@ -1,3 +1,8 @@
+####################################################
+# SurvLatent ODE
+# Author : Intae Moon
+####################################################
+
 import os
 import sys
 import pickle

@@ -1,7 +1,9 @@
-###########################
-# Latent ODEs for Irregularly-Sampled Time Series
-# Author: Yulia Rubanova
-###########################
+####################################################
+# SurvLatent ODE
+# Author : Intae Moon
+#
+# Partially adpated from Latent ODEs for Irregularly-Sampled Time Series (Rubanova et al. 2019)
+####################################################
 
 import numpy as np
 import torch
