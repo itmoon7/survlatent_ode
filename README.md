@@ -1,4 +1,4 @@
-## We'll release more examples with public datasets as well as package requirements soon. Stay tuned!
+### We'll release iPython examples with public datasets as well as package requirements soon. Stay tuned!
 
 ## SurvLatent ODE
 
