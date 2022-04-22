@@ -471,12 +471,22 @@ class Decoder(nn.Module):
 				nn.Linear(10, 1))
 		elif surv_est == 'Hazard':
 			if n_events == 1:
-				decoder = nn.Sequential(
-					nn.Linear(latent_dim, 10),
-					nn.Tanh(),
-					nn.Linear(10, 1),
-					nn.Sigmoid()
-					)
+				if num_layer == 2:
+					decoder = nn.Sequential(
+						nn.Linear(latent_dim, int(latent_dim/2)),
+						nn.Tanh(),
+						nn.Linear(int(latent_dim/2), 1),
+						nn.Sigmoid()
+						)
+				elif num_layer == 3:
+					decoder = nn.Sequential(
+						nn.Linear(latent_dim, int(latent_dim/2)),
+						nn.Tanh(),
+						nn.Linear(int(latent_dim/2), int(latent_dim/2)),
+						nn.Tanh(), # just arbitrailiy choose 5
+						nn.Linear(int(latent_dim/2), 1),
+						nn.Sigmoid()
+						)
 			else:
 				if num_layer == 2:
 					# before

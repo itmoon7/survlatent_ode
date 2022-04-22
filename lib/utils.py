@@ -1258,7 +1258,7 @@ def compute_loss_all_batches(model,
 	n_latent_traj = 1, kl_coef = 1., 
 	max_samples_for_eval = None, plot_survival_curves = True, itr = None, 
 	plot_concord_ibs_across_epoch = True, filename_suffix = None,
-	surv_est = None, dataset = None, bootstrap = False, feat_names = None, max_time = None, min_max_data_tuple = None, survival_loss_scale = 10, optimizer = None, n_events = 1):
+	surv_est = None, dataset = None, bootstrap = False, feat_names = None, max_pred_window = None, min_max_data_tuple = None, survival_loss_scale = 10, optimizer = None, n_events = 1):
 
 	curr_epoch = itr // n_batches_train
 	print('curr_epoch : ', curr_epoch)
@@ -1296,11 +1296,11 @@ def compute_loss_all_batches(model,
 		elif dataset == 'mimic':
 			tp_res = 1
 			min_event_time = 24#/30
-			max_event_time = max_time if max_time is not None else 750 # 1000 hours
+			max_event_time = max_pred_window if max_pred_window is not None else 750 # 1000 hours
 		else:
 			tp_res = 1
 			min_event_time = 1
-			max_event_time = max_time if max_time is not None else 750 # 1000 hours
+			max_event_time = max_pred_window if max_pred_window is not None else 750 # 1000 hours
 
 		pred_y_mult_traj, hazards_y_mult_traj, info = model.get_reconstruction_survival(batch_dict["tp_to_predict"], 
 																					   batch_dict["observed_data"], batch_dict["observed_tp"], batch_dict['end_of_obs_idx'], 
@@ -1455,7 +1455,7 @@ def check_mask(data, mask):
 	# all masked out elements should be zeros
 	assert(torch.sum(data[mask == 0.] != 0.) == 0)
 
-def perform_bootstrap_quantile(test_stat, quant_to_event_oi_train_test_surv_dict, boot_iter = 10000, alpha = 0.05, ef_surv = False, max_time = None, cidx_bootstrap = False):
+def perform_bootstrap_quantile(test_stat, quant_to_event_oi_train_test_surv_dict, boot_iter = 10000, alpha = 0.05, ef_surv = False, max_pred_window = None, cidx_bootstrap = False):
 	"""
 	Obtain confidence interval of median via bootstrap
 	"""
@@ -2210,7 +2210,7 @@ def get_performance_at_quantiles(surv_metric, data_train_tuple, data_test_tuple,
 	# when computing quantiles, get time-to-event from the entry 
 	if horizons is None:
 		horizons = [0.25, 0.375, 0.5, 0.625, 0.75]
-	max_time = event_time_horizon[1]
+	max_pred_window = event_time_horizon[1]
 	# remaining time-to-event quantiles
 	# main assumption here is that lst obs measurement is more or less ovelapping with sequence date
 	test_quantile_times = np.asarray([int(val) for val in np.quantile([t_ for t_, e_ in zip(data_test_tuple[1], data_test_tuple[0]) if e_[-1] == 1], horizons)])
@@ -2262,7 +2262,7 @@ def get_performance_at_quantiles(surv_metric, data_train_tuple, data_test_tuple,
 		Get Khorana analog score (CS-RMFT) here : 
 		"""	
 		if quant == horizons[0] and not ef_surv and sample_ids is not None: # should only do it once
-			cs_rmft = get_cs_rmft_metric(surv_metric_oi_cum, last_observed_points_oi = last_observed_points_oi, max_time = max_time)
+			cs_rmft = get_cs_rmft_metric(surv_metric_oi_cum, last_observed_points_oi = last_observed_points_oi, max_pred_window = max_pred_window)
 			sample_ids_oi = sample_ids[eligible_indices]
 			if len(sample_ids_oi) == len(cs_rmft):
 				sample_id_to_cs_rmft_score_dic = {}
@@ -2287,7 +2287,7 @@ def get_performance_at_quantiles(surv_metric, data_train_tuple, data_test_tuple,
 		event_oi['time'] = [float(event_time_) for event_time_ in test_reamain_tte_oi]
 		test_stat_dic['num_samples'][quant] = num_samples
 		
-		test_stat_dic, quant_to_event_oi_train_test_surv_dict = _performance_at_quantiles(test_stat_dic, event_oi_train, event_oi, surv_metric_oi, test_events_oi, test_reamain_tte_oi, last_observed_points_oi, quant_to_event_oi_train_test_surv_dict = quant_to_event_oi_train_test_surv_dict, surv_metric_oi_cum = surv_metric_oi_cum, quant = quant, quant_time = quant_time, max_time = max_time, ef_surv = ef_surv, n_events = n_events)
+		test_stat_dic, quant_to_event_oi_train_test_surv_dict = _performance_at_quantiles(test_stat_dic, event_oi_train, event_oi, surv_metric_oi, test_events_oi, test_reamain_tte_oi, last_observed_points_oi, quant_to_event_oi_train_test_surv_dict = quant_to_event_oi_train_test_surv_dict, surv_metric_oi_cum = surv_metric_oi_cum, quant = quant, quant_time = quant_time, max_pred_window = max_pred_window, ef_surv = ef_surv, n_events = n_events)
 	
 	# breakpoint()
 	if not ef_surv:
@@ -2298,7 +2298,7 @@ def get_performance_at_quantiles(surv_metric, data_train_tuple, data_test_tuple,
 	
 	display_performance_at_quantiles(test_stat_dic, ef_surv = ef_surv, n_events = n_events)
 	if bootstrap:
-		sampled_ses_dic, conf_ints_dic = perform_bootstrap_quantile(test_stat_dic, quant_to_event_oi_train_test_surv_dict, ef_surv = ef_surv, max_time = event_time_horizon[1])																
+		sampled_ses_dic, conf_ints_dic = perform_bootstrap_quantile(test_stat_dic, quant_to_event_oi_train_test_surv_dict, ef_surv = ef_surv, max_pred_window = event_time_horizon[1])																
 		return test_stat_dic, sampled_ses_dic, conf_ints_dic
 	else:
 		return test_stat_dic, None, None
@@ -2611,7 +2611,7 @@ def plot_performance(model_performance, surv_est = None, bootstrap = False, file
 	return
 
 def variable_time_collate_fn_survival(batch, device = torch.device("cpu"), data_type = "train", 
-	data_min = None, data_max = None, dataset = None, max_time = None, feat_reconstr_idx = None, feat_names = None, check_extrapolation = False, max_obs_time = None, pred_from_sequence = True):
+	data_min = None, data_max = None, dataset = None, max_pred_window = None, feat_reconstr_idx = None, feat_names = None, check_extrapolation = False, max_obs_time = None, pred_from_sequence = True):
 	"""
 	Expects a batch of time series data in the form of (record_id, tt, vals, mask, labels) where
 		- record_id is a patient id
@@ -2654,11 +2654,13 @@ def variable_time_collate_fn_survival(batch, device = torch.device("cpu"), data_
 	"""
 	Add combined mask surv and get the right shape! 
 	"""
-	if dataset == 'mimic' or dataset == 'general':
-		if max_time is not None:
-			combined_mask_surv = torch.zeros([len(batch), int(max_time)]).to(device)
+	if dataset == 'general':
+		if max_pred_window is not None:
+			combined_mask_surv = torch.zeros([len(batch), int(max_pred_window)]).to(device)
 		else:
 			combined_mask_surv = None
+	else:
+		raise NotImplementedError
 
 	combined_labels = None
 	N_labels = 1
@@ -2668,55 +2670,39 @@ def variable_time_collate_fn_survival(batch, device = torch.device("cpu"), data_
 	
 	dur_total = torch.zeros(len(batch)).to(device)
 	if check_extrapolation:
-		# itr_tuple = (_, _, _, _, _, _, _, _, _, dur)
 		for idx, (_, _, _, _, _, _, _, _, _, dur) in enumerate(batch):
-			if dataset == 'physionet':
-				# time to event from the first observation
-				# conver this to hours so that its time unit is consistent with data timepoints
-				dur_total[idx] = dur * 24 #- 48 
-			else:
-				# in general dataset, get duration from the first observation
-				dur_total[idx] = dur[0]
+			# in general dataset, get duration from the first observation
+			dur_total[idx] = dur[0]
 	else:
-		# itr_tuple = 
 		for idx, (_, _, _, _, _, _, dur) in enumerate(batch):
-			if dataset == 'physionet':
-				# time to event from the first observation
-				# conver this to hours so that its time unit is consistent with data timepoints
-				dur_total[idx] = dur * 24 #- 48 
-			else:
-				# in general dataset, get duration from the first observation
-				dur_total[idx] = dur[0]
+			# in general dataset, get duration from the first observation
+			dur_total[idx] = dur[0]
 	sample_ids = []; pred_horizon_idx = []; remaining_time_to_event = []; end_of_obs_idx = []
 	if check_extrapolation:
 		# itr_tuple = 
 		for b, (record_id, tt, tt_ext, vals, vals_ext, mask, mask_ext, mask_surv, labels, dur) in enumerate(batch):
 			sample_ids.append(record_id)
 			tt = tt.to(device)
-			# breakpoint()
+			
 			vals = vals.to(device)
 			mask = mask.to(device)
-			# breakpoint()
+			
 			mask_surv = mask_surv.to(device) # mask for survival. only use hazard from the latest observation to its time of the event
 
 			if labels is not None:
 				labels = labels.to(device)
 
-			# indices = inverse_indices[offset:offset + len(tt)]
-			# offset += len(tt)
 			indices = tt.long()
 
 			combined_vals[b, indices] = vals
 			combined_mask[b, indices] = mask
 
-			# breakpoint()
 			end_of_obs_idx.append(tt[-1])
 
 			if check_extrapolation:
 				combined_tt_ext.append(tt_ext)
 
 			if feat_reconstr_idx is not None:
-				# breakpoint()
 				combined_vals_reconstr[b, indices] = vals[:, feat_reconstr_idx]
 				combined_mask_reconstr[b, indices] = mask[:, feat_reconstr_idx]
 				if check_extrapolation:
@@ -2726,24 +2712,15 @@ def variable_time_collate_fn_survival(batch, device = torch.device("cpu"), data_
 				if check_extrapolation:
 					combined_vals_ext.append(vals_ext)
 					combined_mask_ext.append(mask_ext)
-			# try:
+
 			if combined_mask_surv is not None:
 				combined_mask_surv[b] = mask_surv
-			# except:
-			# 	pass
 
-			# combined_time_to_event[b] = dur[0]
-			# if dataset in ['framingham', 'mimic']:
 			dur_oi = dur[0] # duration from the very initial observation
-			# else:
-			# 	dur_oi = dur
-
-			# breakpoint()
+			
 			remaining_time_to_event.append(dur[-1])
 			time_to_event_idx = len(combined_tt[combined_tt < dur_oi]) - 1
-			# get start/end of pred. window
-			# in order to compute corresponding hazards, 
-			# note that hazards at the last observations and last follow-up date need to be inclusive
+			
 			pred_start_idx = len(combined_tt[combined_tt < tt[-1]]) 
 			if time_to_event_idx == len(combined_tt) - 1:
 				combined_time_to_event_idx[b] = time_to_event_idx + len(dur_total[dur_total < float(dur_oi)])
@@ -2760,9 +2737,9 @@ def variable_time_collate_fn_survival(batch, device = torch.device("cpu"), data_
 				combined_labels[b] = labels
 	else:
 		# itr_tuple = (record_id, tt, vals, mask, mask_surv, labels, dur)
-		if pred_from_sequence and dataset == 'general': # no need for this ... later 
-			with open('dvt_data/mrn_to_sequence_time_dict.pkl', 'rb') as pkl_file:
-				mrn_to_sequence_time_dict = pickle.load(pkl_file)
+		# if pred_from_sequence and dataset == 'general': # no need for this ... later 
+		# 	with open('dvt_data/mrn_to_sequence_time_dict.pkl', 'rb') as pkl_file:
+		# 		mrn_to_sequence_time_dict = pickle.load(pkl_file)
 		for b, (record_id, tt, vals, mask, mask_surv, labels, dur) in enumerate(batch):
 			sample_ids.append(record_id)
 			tt = tt.to(device)
@@ -2789,10 +2766,10 @@ def variable_time_collate_fn_survival(batch, device = torch.device("cpu"), data_
 			
 			# breakpoint()
 			# end of observation TIME 
-			if pred_from_sequence and dataset == 'general':
-				end_of_obs_idx.append(mrn_to_sequence_time_dict[int(record_id)])
-			else:
-				end_of_obs_idx.append(tt[-1])
+			# if pred_from_sequence and dataset == 'general':
+			# 	end_of_obs_idx.append(mrn_to_sequence_time_dict[int(record_id)])
+			# else:
+			end_of_obs_idx.append(tt[-1])
 
 			if check_extrapolation:
 				combined_tt_ext.append(tt_ext)
@@ -2864,24 +2841,24 @@ def variable_time_collate_fn_survival(batch, device = torch.device("cpu"), data_
 		# combined_time_to_event = combined_time_to_event / torch.max(combined_tt)
 		# normalize combined tt
 		combined_tt_normalized = (combined_tt - torch.min(combined_tt)) / torch.max(combined_tt)
-	if dataset == 'general':
-		# pass
-		total_time_to_pred = torch.arange(0, max_time, 1).to(device)
-		total_time_to_pred_normalized = (total_time_to_pred - torch.min(total_time_to_pred)) / (torch.max(total_time_to_pred) - torch.min(total_time_to_pred))
-	elif dataset == 'mimic':
-		"""
-		Quantile survival
-		25% 85.000000
-		50% 137.000000
-		75% 200.000000
-		95% 519
-		"""
-		# if check_extrapolation:
-		extra_time_to_pred = torch.arange(combined_tt[-1] + 1, max_time, 1).to(device) # +1 in torch ensures that the list is strictly increasing. in this case, time resolution is one hour
-		total_time_to_pred = torch.cat((combined_tt, extra_time_to_pred))
-		# else:
-		# 	total_time_to_pred = combined_tt
-		total_time_to_pred_normalized = (total_time_to_pred - torch.min(total_time_to_pred)) / (torch.max(total_time_to_pred) - torch.min(total_time_to_pred))
+	# if dataset == 'general':
+	# 	# pass
+	total_time_to_pred = torch.arange(0, max_pred_window, 1).to(device)
+	total_time_to_pred_normalized = (total_time_to_pred - torch.min(total_time_to_pred)) / (torch.max(total_time_to_pred) - torch.min(total_time_to_pred))
+	# elif dataset == 'mimic':
+	# 	"""
+	# 	Quantile survival
+	# 	25% 85.000000
+	# 	50% 137.000000
+	# 	75% 200.000000
+	# 	95% 519
+	# 	"""
+	# 	# if check_extrapolation:
+	# 	extra_time_to_pred = torch.arange(combined_tt[-1] + 1, max_pred_window, 1).to(device) # +1 in torch ensures that the list is strictly increasing. in this case, time resolution is one hour
+	# 	total_time_to_pred = torch.cat((combined_tt, extra_time_to_pred))
+	# 	# else:
+	# 	# 	total_time_to_pred = combined_tt
+	# 	total_time_to_pred_normalized = (total_time_to_pred - torch.min(total_time_to_pred)) / (torch.max(total_time_to_pred) - torch.min(total_time_to_pred))
 		# end_of_obs_idx = len(combined_tt) # orig version
 	# breakpoint()
 	"""
@@ -2974,7 +2951,7 @@ def get_data_min_max(records, dataset = None, device = None, check_extrapolation
 
 	return data_min, data_max
 
-def train_surv_model(model, data_obj, params_dic, device = None, surv_est = None, max_time = None, run_id = None, dataset = None, survival_loss_scale = 10, n_latent_traj = 1, early_stopping = False, survival_loss_exp = False, train_info = None, n_events = 1, wait_until_full_surv_loss = 15):
+def train_surv_model(model, data_obj, params_dic, device = None, surv_est = None, max_pred_window = None, run_id = None, dataset = None, survival_loss_scale = 10, n_latent_traj = 1, early_stopping = False, survival_loss_exp = False, train_info = None, n_events = 1, wait_until_full_surv_loss = 15):
 	"""
 	survival_loss_exp = survival_loss_exp
 	itr_prev : iteration from the previous latest model
@@ -3069,13 +3046,13 @@ def train_surv_model(model, data_obj, params_dic, device = None, surv_est = None
 			with torch.no_grad():
 				# if survival_mode_num != 3:
 				model_performance = compute_loss_all_batches(model, 
-					None, data_obj["train_dataloader_cox"] if "train_dataloader_cox" in data_obj.keys() else None, 
+					None, data_obj["train_dataloader_full_batch"] if "train_dataloader_full_batch" in data_obj.keys() else None, 
 					data_obj["valid_dataloader"] if "valid_dataloader" in data_obj.keys() else None, params_dic,
 					n_batches = data_obj["n_valid_batches"],
 					n_batches_train = num_batches,
 					device = device,
 					kl_coef = kl_coef, itr = itr if train_info is None else train_info['itr'] + itr, filename_suffix = run_id, 
-					surv_est = surv_est, dataset = dataset, feat_names = data_obj['attr'], max_time = max_time, min_max_data_tuple = min_max_data_tuple, 
+					surv_est = surv_est, dataset = dataset, feat_names = data_obj['attr'], max_pred_window = max_pred_window, min_max_data_tuple = min_max_data_tuple, 
 					survival_loss_scale = survival_loss_scale_actual, n_latent_traj = n_latent_traj, optimizer = optimizer, n_events = n_events)
 			# check for early stopping condition by looking at the last 4 iterations
 			if early_stopping and (itr // num_batches) >= max(10, wait_until_full_surv_loss):
@@ -3341,9 +3318,9 @@ def evaluate_test_set(df_perf_result, model_info, batch_dict, surv_prob, rec_los
 		# set minimum prediction window time and time resolution
 		# min_event_time = 24; tp_res = 1
 		if dataset == 'mimic':
-			min_event_time, max_time, tp_res = 24, 600, 1
+			min_event_time, max_pred_window, tp_res = 24, 600, 1
 
-		# auc, mean_auc = compute_auc(surv_prob, data_train_tuple, data_test_tuple, [], [], event_time_horizon = (min_event_time, max_time, tp_res), filename_suffix = run_id, curr_epoch = curr_epoch, plot = True)
+		# auc, mean_auc = compute_auc(surv_prob, data_train_tuple, data_test_tuple, [], [], event_time_horizon = (min_event_time, max_pred_window, tp_res), filename_suffix = run_id, curr_epoch = curr_epoch, plot = True)
 
 		# perf_dic['auc'] = auc
 		# perf_dic['mean_auc'] = mean_auc
@@ -3353,16 +3330,16 @@ def evaluate_test_set(df_perf_result, model_info, batch_dict, surv_prob, rec_los
 
 		if dataset == 'mimic':
 			print('orig eval')
-			test_stat_dic, sampled_ses_dic, conf_ints_dic = get_performance_at_quantiles_orig(surv_prob, data_train_tuple, data_test_tuple, bootstrap = True, event_time_horizon = (min_event_time, max_time, tp_res), dataset = dataset)
+			test_stat_dic, sampled_ses_dic, conf_ints_dic = get_performance_at_quantiles_orig(surv_prob, data_train_tuple, data_test_tuple, bootstrap = True, event_time_horizon = (min_event_time, max_pred_window, tp_res), dataset = dataset)
 			# breakpoint()
 		else:
-			test_stat_dic, sampled_ses_dic, conf_ints_dic = get_performance_at_quantiles(surv_prob, data_train_tuple, data_test_tuple, bootstrap = True, event_time_horizon = (min_event_time, max_time, tp_res), dataset = dataset)
+			test_stat_dic, sampled_ses_dic, conf_ints_dic = get_performance_at_quantiles(surv_prob, data_train_tuple, data_test_tuple, bootstrap = True, event_time_horizon = (min_event_time, max_pred_window, tp_res), dataset = dataset)
 		quantile_perf_dic = {}
 		quantile_perf_dic['point_ests'] = test_stat_dic
 		quantile_perf_dic['bootstrap_ses'] = sampled_ses_dic
 		quantile_perf_dic['bootstrap_cis'] = conf_ints_dic
 
-		ibs, ibs_censored, ibs_uncensored = compute_integrated_brier_score(surv_prob, data_train_tuple, data_test_tuple, event_time_horizon = (min_event_time, max_time, tp_res), filename_suffix = run_id, curr_epoch = curr_epoch, plot = True)		
+		ibs, ibs_censored, ibs_uncensored = compute_integrated_brier_score(surv_prob, data_train_tuple, data_test_tuple, event_time_horizon = (min_event_time, max_pred_window, tp_res), filename_suffix = run_id, curr_epoch = curr_epoch, plot = True)		
 		# perf_dic['ibs'] = ibs
 		# df_perf_result.at[idx, 'ibs'] = ibs
 		df_perf_result.at[idx, 'ibs_censored'] = ibs_censored
@@ -3567,15 +3544,15 @@ def get_cs_rmft_metric(cs_cif_cum, pred_window = 180, max_time = 700, last_obser
 	"""
 	if last_observed_points_oi is not None:
 		try:
-			max_pred_window = max_time - int(np.max(last_observed_points_oi).cpu().numpy())
+			max_time = max_time - int(np.max(last_observed_points_oi).cpu().numpy())
 		except:
-			max_pred_window = max_time - int(np.max(last_observed_points_oi))
+			max_time = max_time - int(np.max(last_observed_points_oi))
 		# print('max_pred_window : ', max_pred_window)
 		# breakpoint()
 		# last_observed_points_oi
 	else:
 		max_pred_window = pred_window
-	pred_window_oi = min(max_pred_window, pred_window)
+	pred_window_oi = min(max_time, pred_window)
 
 	cs_rmft = []
 	for cs_cif_cum_per_sample in cs_cif_cum:
@@ -3584,7 +3561,7 @@ def get_cs_rmft_metric(cs_cif_cum, pred_window = 180, max_time = 700, last_obser
 	return np.asarray(cs_rmft)
 
 
-def _performance_at_quantiles(test_stat_dic, event_oi_train, event_oi, surv_metric_oi, test_events_oi, test_reamain_tte_oi, last_observed_points_oi, quant_to_event_oi_train_test_surv_dict = None, surv_metric_oi_cum = None, quant = None, horizons = None, quant_time = None, max_time = None, time_varying_metric = False, remain_test_quantile_times = None, ef_surv = False, n_events = 1):
+def _performance_at_quantiles(test_stat_dic, event_oi_train, event_oi, surv_metric_oi, test_events_oi, test_reamain_tte_oi, last_observed_points_oi, quant_to_event_oi_train_test_surv_dict = None, surv_metric_oi_cum = None, quant = None, horizons = None, quant_time = None, max_pred_window = None, time_varying_metric = False, remain_test_quantile_times = None, ef_surv = False, n_events = 1):
 
 	# Get performance for censored and uncensored separately
 	censored_idx = []; censored_time_list = []; uncensored_idx = []; uncensored_time_list = []
@@ -3611,8 +3588,12 @@ def _performance_at_quantiles(test_stat_dic, event_oi_train, event_oi, surv_metr
 
 	if n_events == 1 or ef_surv:
 		bs = brier_score(event_oi_train, event_oi, surv_metric_oi, quant_time)[1][0]
-		bs_censored = brier_score(event_oi_train, event_oi_censored, surv_metric_oi[censored_idx], quant_time)[1][0]
-		bs_uncensored = brier_score(event_oi_train, event_oi_uncensored, surv_metric_oi[uncensored_idx], quant_time)[1][0]
+		try:
+			bs_censored = brier_score(event_oi_train, event_oi_censored, surv_metric_oi[censored_idx], quant_time)[1][0]
+			bs_uncensored = brier_score(event_oi_train, event_oi_uncensored, surv_metric_oi[uncensored_idx], quant_time)[1][0]
+		except:
+			bs_censored = 0.0
+			bs_uncensored = 0.0
 		
 	if not ef_surv:
 		if n_events == 1:
@@ -3625,7 +3606,7 @@ def _performance_at_quantiles(test_stat_dic, event_oi_train, event_oi, surv_metr
 			auc, mean_auc = cumulative_dynamic_auc(event_oi_train, event_oi, surv_metric_oi, quant_time)
 		else:
 			# In multiple events, we get {c, auc, mean_auc} and {bs}, separately 
-			cs_rmft = get_cs_rmft_metric(surv_metric_oi_cum, last_observed_points_oi = last_observed_points_oi, max_time = max_time)
+			cs_rmft = get_cs_rmft_metric(surv_metric_oi_cum, last_observed_points_oi = last_observed_points_oi, max_time = max_pred_window)
 			c_idx = concordance_index_ipcw(event_oi_train, event_oi, cs_rmft)[0]# for idx, quantile_ in enumerate(test_quantile_times)]
 			auc, mean_auc = cumulative_dynamic_auc(event_oi_train, event_oi, surv_metric_oi, quant_time)
 
@@ -3668,34 +3649,25 @@ def display_performance_at_quantiles(test_stat_dic, ef_surv = False, n_events = 
 	return
 
 
-# def create_quantiles_dict():
-"""
-
-
-
-"""
-def pre_process_data(data, data_info_dic, check_extrapolation = False, dataset = 'general', n_events = 1, n_samples = None, max_time = None, pred_from_sequence = True, include_test_set = False, impute = None): # we would not want to have mimic dataset indicator. just excpetion for speed
+def pre_process_data(data, data_info_dic, n_samples = None, max_pred_window = None, include_test_set = False, n_events = 1, dataset = 'general'): 
 		
 	dat_cat = data[data_info_dic['feat_cat']]
-	# for gender (Men : 'M', Women : 'F') -> (Men : 1, Women : -1)
-	# everything else (1, 0) -> (1, -1)
+	# data preprocessing before missing values are replaced by 0
+	# categorical variables : 0 -> -1
 	for col in dat_cat.columns:
 		df_oi = dat_cat[col]
 		df_oi.loc[df_oi.values == 0, ] = -1
 
+	# continuous variables : 0 -> 1e-3
 	dat_num = data[data_info_dic['feat_cont']]
-	# breakpoint()
-	# change 0 to very small num so they don't get confused with missing values
 	for col in dat_num.columns:
 		df_oi = dat_num[col]
 		df_oi.loc[df_oi.values == 0, ] = 1e-3
 
-	# x1 = pd.get_dummies(dat_cat).values
 	x1 = dat_cat.values
 	x2 = dat_num.values
-	x_orig = np.hstack([x1, x2])
+	x = np.hstack([x1, x2])
 	feat_names = list(dat_cat.columns) + list(dat_num.columns)
-	# breakpoint()
 
 	# in the case of competing risks (mutually exclusive events) :
 	time = data[data_info_dic['time_col']].values
@@ -3742,15 +3714,8 @@ def pre_process_data(data, data_info_dic, check_extrapolation = False, dataset =
 		prev_id_ = id_
 	# for the last sample
 	sample_id_to_range_dic[prev_id_] = (start_idx, idx_ + 1)
-	# if start_idx == idx_:
-	# 	breakpoint()
 	# set missing values to 0; all zeroed values will be masked
-	if impute == 'mean':
-		x_ = SimpleImputer(missing_values=np.nan, strategy='mean').fit_transform(x_orig)
-		# for getting masks
-		x_orig = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value = 0.0).fit_transform(x_orig)
-	else:
-		x_ = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value = 0.0).fit_transform(x_orig)
+	x_ = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value = 0.0).fit_transform(x)
 
 	unique_ids = list(set(data[data_info_dic['id_col']].values))
 	if n_samples is not None:
@@ -3758,144 +3723,50 @@ def pre_process_data(data, data_info_dic, check_extrapolation = False, dataset =
 	else:
 		sampled_ids = unique_ids
 
-	# breakpoint()
 	if dataset == 'general':
-		# pass
-		if pred_from_sequence:
-			with open('dvt_data/mrn_to_sequence_time_dict.pkl', 'rb') as pkl_file:
-				mrn_to_sequence_time_dict = pickle.load(pkl_file)
-		x, m, t, t_end, e, dur, ms = [], [], [], [], [], [], [] # where m is a mask for observed values, ms is a mask for survival from the last observation
+		x, m, t, t_end, e, dur, ms = [], [], [], [], [], [], [] # where m is a mask for observed values, ms is a mask for hazard function
 		x_ext, m_ext, t_ext = [], [], []
 		sample_ids = sorted(list(set(data[data_info_dic['id_col']]))); sample_ids_inc = []
-		for id_ in tqdm(sample_ids, desc = 'Iterating through each sample...'):
+		for id_ in tqdm(sample_ids, desc = 'Pre-processing data...'):
 			if id_ in sampled_ids: # make sure id_ belongs to the sampled cohort
 				sample_ids_inc.append(id_)
 				start, end = sample_id_to_range_dic[id_]
-				# if start == end:
-				# 	end += 1
-					# x.append(x_[start:end + 1])
-					# m.append((x_[start:end + 1] != 0)*1)
-					# t.append(time[start:end + 1])
-					# breakpoint()
-				# else:
+				
 				x.append(x_[start:end])
-				if impute == 'mean':
-					m.append((x_orig[start:end] != 0)*1)
-				else:
-					m.append((x_[start:end] != 0)*1)
+				m.append((x_[start:end] != 0)*1)
 				t.append(time[start:end])
 				t_end.append(time[end-1])
-				# breakpoint()
-				if max_time is not None: # perform administrative censoring
-					if pred_from_sequence:
-						last_obs_time = int(mrn_to_sequence_time_dict[id_])
-					else:
-						last_obs_time = int(time[end-1]) # get sequence date as the last observation time
+				if max_pred_window is not None: # perform administrative censoring
+					last_obs_time = int(time[end-1]) 
 					dur_from_last_obs = int(durations[end-1])
 					dur_from_init_obs = int(durations[start])
-					remain_dur = int(max_time - dur_from_last_obs - last_obs_time) # this makes sense since we're getting prediction from the lastest observation
+					remain_dur = int(max_pred_window - dur_from_last_obs - last_obs_time) 
 					if remain_dur <= 0:
 						e.append(0)
-						remain_dur = max(0, int(max_time - dur_from_last_obs - last_obs_time))
-						dur_from_last_obs = min(dur_from_last_obs, int(max_time - last_obs_time))
-						dur.append(durations[start:end] - (dur_from_init_obs - max_time)) # administratively censor samples at the max time from last observation
+						remain_dur = max(0, int(max_pred_window - dur_from_last_obs - last_obs_time))
+						dur_from_last_obs = min(dur_from_last_obs, int(max_pred_window - last_obs_time))
+						dur.append(durations[start:end] - (dur_from_init_obs - max_pred_window)) # administratively censor samples at the max prediction time window
 					else:
-						e.append(event[start:end][-1]) # since event is specified across all entries, just grab the last one
+						e.append(event[start:end][-1]) 
 						dur.append(durations[start:end])
-					# mask from the initial observation
-					# breakpoint()
+					# mask for survival such that hazards from the latest measurement for each sample are incorporated into the loss
 					ms_ = list(np.zeros(last_obs_time, dtype = bool)) + list(np.ones(dur_from_last_obs, dtype = bool)) + list(np.zeros(remain_dur, dtype = bool))
-					# if sum(ms_) == 0:
-					# 	breakpoint()
-					ms.append(ms_)
-					# if id_ == 780216:
-					# 	breakpoint()
-				else:
-					ms.append(0)  
-					e.append(event[start:end][-1])
-
-	elif dataset == 'mimic':
-		if include_test_set:
-			with open('./mimic_data/sample_id_to_range_dic_full_meas_more_labs_36_hours.pkl', 'rb') as handle: # sample_id_to_range_dic_full_meas, sample_id_to_range_dic_full_meas_compet_risks_v4
-				sample_id_to_range_dic = pickle.load(handle)
-		# with open('./mimic_data/sample_id_to_range_dic_full_meas.pkl', 'rb') as handle: # sample_id_to_range_dic_full_meas, sample_id_to_range_dic_full_meas_compet_risks_v4
-		# 	sample_id_to_range_dic = pickle.load(handle)
-		x, m, t, t_end, e, dur, ms = [], [], [], [], [], [], [] # where m is a mask for observed values, ms is a mask for survival from the last observation
-		x_ext, m_ext, t_ext = [], [], []
-		sample_ids = sorted(list(set(data[data_info_dic['id_col']]))); sample_ids_inc = []
-		for id_ in tqdm(sample_ids, desc = 'Iterating through each sample...'):
-			# if n_samples is not None:
-			if id_ in sampled_ids:
-				sample_ids_inc.append(id_)
-				if check_extrapolation:
-					start, end, end_ext = sample_id_to_range_dic[id_]
-				else:
-					start, end = sample_id_to_range_dic[id_]
-				x.append(x_[start:end])
-				if impute == 'mean':
-					m.append((x_orig[start:end] != 0)*1)
-				else:
-					m.append((x_[start:end] != 0)*1)
-				# breakpoint()
-				t.append(time[start:end])
-				t_end.append(time[end - 1])
-				# breakpoint()
-				# get extra information beyond observation window
-				if check_extrapolation:
-					x_ext.append(x_[end:end_ext])
-					if impute == 'mean':
-						m_ext.append((x_orig[end:end_ext] != 0)*1)
-					else:
-						m_ext.append((x_[end:end_ext] != 0)*1)
-					t_ext.append(time[end:end_ext])
-				# breakpoint()
-				if max_time is not None: # perform administrative censoring
-					last_obs_time = int(time[end-1])
-					dur_from_last_obs = int(durations[end-1])
-					dur_from_init_obs = int(durations[start])
-					remain_dur = int(max_time - dur_from_last_obs - last_obs_time) # this makes sense since we're getting prediction from the lastest observation
-					if remain_dur <= 0:
-						e.append(0)
-						remain_dur = max(0, int(max_time - dur_from_last_obs - last_obs_time))
-						dur_from_last_obs = min(dur_from_last_obs, int(max_time - last_obs_time))
-						# dur.append(durations[start:end])
-						# breakpoint()
-						dur.append(durations[start:end] - (dur_from_init_obs - max_time)) # administratively censor samples at the max time from last observation
-						# print(durations[start:end] - (dur_from_init_obs - max_time))
-						# breakpoint()
-					else:
-						# breakpoint()
-						e.append(event[start:end][-1]) # since event is specified across all entries, just grab the last one
-						dur.append(durations[start:end])
-					# mask from the initial observation
-					ms_ = list(np.zeros(last_obs_time, dtype = bool)) + list(np.ones(dur_from_last_obs, dtype = bool)) + list(np.zeros(remain_dur, dtype = bool))
-					# ms_ = list(np.ones(dur_from_last_obs, dtype = bool)) + list(np.zeros(remain_dur, dtype = bool))
-					# breakpoint()
 					ms.append(ms_)
 				else:
 					ms.append(0)  
 					e.append(event[start:end][-1])
+	else:
+		raise NotImplementedError
 	print('Complete!')
 	print('\n')
-	max_obs_time = max(t_end)
-	# breakpoint()
-	return sample_ids_inc, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, max_obs_time, feat_names
+	return sample_ids_inc, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, max(t_end)
 
-def get_data_obj(ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, param_dics, max_obs_time = None, dataset = 'general', check_extrapolation = False, process_test_set = False, device = None, max_time = None, min_max_tuple = None, include_test_set = False, feat_reconstr = None, test_restrict = None):
-
+def get_data_obj(ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, param_dics, process_test_set = False, device = None, max_pred_window = None, min_max_tuple = None, include_test_set = False, feat_reconstr = None, check_extrapolation = False, dataset = 'general', max_obs_time = None):
 	# splitting the data into train, test, and validation sets
 	n = len(x)
-
-	# tr_size = int(n*0.70)
-	# vl_size = int(n*0.10)
-	# te_size = int(n*0.20)
-
 	# get indices for feats to reconstruct
 	feat_reconstr_idx = [feat_names.index(feat) for feat in feat_reconstr] if feat_reconstr is not None else None
-	# breakpoint()
-	# total of 18 features
 	total_dataset = []
-	# breakpoint()
 	if check_extrapolation:
 		for id_, x_, x_ext_, m_, m_ext_, ms_, t_, t_ext_, e_, dur_ in zip(ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur):
 			total_dataset.append((str(id_), torch.tensor(t_, dtype = torch.float), torch.tensor(t_ext_, dtype = torch.float), torch.tensor(x_, dtype = torch.float), torch.tensor(x_ext_, dtype = torch.float), torch.tensor(m_, dtype = torch.float), torch.tensor(m_ext_, dtype = torch.float), torch.tensor(ms_, dtype = torch.float), torch.tensor(e_, dtype = torch.float), torch.tensor(dur_, dtype = torch.float)))
@@ -3903,37 +3774,9 @@ def get_data_obj(ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, para
 		for id_, x_, m_, ms_, t_, e_, dur_ in zip(ids, x, m, ms, t, e, dur):
 			total_dataset.append((str(id_), torch.tensor(t_, dtype = torch.float), torch.tensor(x_, dtype = torch.float), torch.tensor(m_, dtype = torch.float), torch.tensor(ms_, dtype = torch.float), torch.tensor(e_, dtype = torch.float), torch.tensor(dur_, dtype = torch.float)))
 
-	# breakpoint()
-	# total_time_points = 
-	# i) create the dataloader compatible with the ode-rnn framework
-	# Shuffle and split
-	# train 55, valid 15, test 30
 	if include_test_set: # this needs to be removed for a practical implementation
-		if dataset == 'mimic':
-			train_data, test_data = model_selection.train_test_split(total_dataset, train_size= 0.7, random_state = 42, shuffle = True)
-			train_data, valid_data = model_selection.train_test_split(train_data, train_size= 0.7857, random_state = 33, shuffle = True) #0.7857
-			# print('general dataset')
-		elif test_restrict == 'non_khorana': # change as you want it 
-			with open('dvt_data/khorana_mrns.npy', 'rb') as f:
-				khorana_mrns = np.load(f)
-			# breakpoint()
-			print('non_khorana')
-			test_data = []; other_data = []
-			for id_, x_, m_, ms_, t_, e_, dur_ in total_dataset:
-				if int(id_) in khorana_mrns:
-					test_data.append((id_, x_, m_, ms_, t_, e_, dur_))
-				else:
-					other_data.append((id_, x_, m_, ms_, t_, e_, dur_))
-			# train_data, test_data = model_selection.train_test_split(total_dataset, train_size= 0.7, random_state = 42, shuffle = True)
-			train_data, valid_data = model_selection.train_test_split(other_data, train_size= 0.7857, random_state = 33, shuffle = True) #0.7857
-			# breakpoint()
-		else:
-			# train_data, test_data = model_selection.train_test_split(total_dataset, train_size= 0.7, random_state = 42, shuffle = True)
-			# train_data, valid_data = model_selection.train_test_split(train_data, train_size= 0.7857, random_state = 33, shuffle = True)
-
-			# 65 - 15 - 20
-			train_data, test_data = model_selection.train_test_split(total_dataset, train_size= 0.8, random_state = 42, shuffle = True)
-			train_data, valid_data = model_selection.train_test_split(train_data, train_size= 0.8125, random_state = 33, shuffle = True) #0.7857
+		train_data, test_data = model_selection.train_test_split(total_dataset, train_size= 0.7, random_state = 42, shuffle = True)
+		train_data, valid_data = model_selection.train_test_split(train_data, train_size= 0.7857, random_state = 33, shuffle = True) #0.7857
 
 		if check_extrapolation:
 			record_id, tt, _, vals, _, mask, _, mask_surv, labels, dur = train_data[0]
@@ -3944,49 +3787,38 @@ def get_data_obj(ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, para
 		input_dim = vals.size(-1)
 
 		batch_size = min(min(len(train_data), param_dics['batch_size']), n_samples)
-		# get min and max using train and valid sets only :
-		# breakpoint()
-		# get normalization params
-		data_min, data_max = get_data_min_max(train_data, dataset = dataset, device = device, check_extrapolation = check_extrapolation)
-		# breakpoint()
-
-		train_dataloader = DataLoader(train_data, batch_size= batch_size, shuffle=False, 
-			collate_fn= lambda batch: variable_time_collate_fn_survival(batch, device, data_type = "train",
-				data_min = data_min, data_max = data_max, dataset = dataset, max_time = max_time, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
+		# get min and max using train sets only for normalization
+		data_min, data_max = utils.get_data_min_max(train_data, dataset = dataset, device = device, check_extrapolation = check_extrapolation)
 		
-		train_dataloader_baseline = DataLoader(train_data, batch_size= len(train_data), shuffle=False, 
-			collate_fn= lambda batch: variable_time_collate_fn_survival(batch, device, data_type = "train",
-				data_min = data_min, data_max = data_max, dataset = dataset, max_time = max_time, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
+		train_dataloader = DataLoader(train_data, batch_size= batch_size, shuffle=False, 
+			collate_fn= lambda batch: utils.variable_time_collate_fn_survival(batch, device, data_type = "train",
+				data_min = data_min, data_max = data_max, dataset = dataset, max_pred_window = max_pred_window, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
+		
+		train_dataloader_full_batch = DataLoader(train_data, batch_size= len(train_data), shuffle=False, 
+			collate_fn= lambda batch: utils.variable_time_collate_fn_survival(batch, device, data_type = "train",
+				data_min = data_min, data_max = data_max, dataset = dataset, max_pred_window = max_pred_window, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
 
-		# breakpoint(), len(valid_data), batch_size*2
 		valid_dataloader = DataLoader(valid_data, batch_size = batch_size*2, shuffle=False, # prev : batch_size*2
-			collate_fn= lambda batch: variable_time_collate_fn_survival(batch, device, data_type = "test",
-				data_min = data_min, data_max = data_max, dataset = dataset, max_time = max_time, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
+			collate_fn= lambda batch: utils.variable_time_collate_fn_survival(batch, device, data_type = "test",
+				data_min = data_min, data_max = data_max, dataset = dataset, max_pred_window = max_pred_window, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
 
 		test_dataloader = DataLoader(test_data, batch_size = len(test_data), shuffle=False, 
-			collate_fn= lambda batch: variable_time_collate_fn_survival(batch, device, data_type = "test",
-				data_min = data_min, data_max = data_max, dataset = dataset, max_time = max_time, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
+			collate_fn= lambda batch: utils.variable_time_collate_fn_survival(batch, device, data_type = "test",
+				data_min = data_min, data_max = data_max, dataset = dataset, max_pred_window = max_pred_window, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
 
-		train_mrns = [data[0] for data in train_data]
-		test_mrns = [data[0] for data in test_data]
-		valid_mrns = [data[0] for data in valid_data]
-		train_test_valid_sets_to_sample_ids = {}
-		train_test_valid_sets_to_sample_ids['train'] = train_mrns
-		train_test_valid_sets_to_sample_ids['test'] = test_mrns
-		train_test_valid_sets_to_sample_ids['valid'] = valid_mrns
 
-		data_objects = {"train_dataloader": inf_generator(train_dataloader), 
-						"train_dataloader_cox": inf_generator(train_dataloader_baseline),
-						"valid_dataloader": inf_generator(valid_dataloader),
-						"test_dataloader": inf_generator(test_dataloader),
+		data_objects = {"train_dataloader": utils.inf_generator(train_dataloader), 
+						"train_dataloader_full_batch": utils.inf_generator(train_dataloader_full_batch),
+						"valid_dataloader": utils.inf_generator(valid_dataloader),
+						"test_dataloader": utils.inf_generator(test_dataloader),
 						"input_dim": input_dim,
 						"n_train_batches": len(train_dataloader),
 						"n_valid_batches": len(valid_dataloader),
 						"attr": feat_names if feat_reconstr is None else feat_reconstr} #optional
-		return data_objects, (data_min, data_max), feat_reconstr_idx
+		return data_objects, (data_min, data_max)
 	elif not process_test_set:
 		train_data, valid_data = model_selection.train_test_split(total_dataset, train_size= 0.8, random_state = 42, shuffle = True)
-		
+
 		if check_extrapolation:
 			record_id, tt, _, vals, _, mask, _, mask_surv, labels, dur = train_data[0]
 		else:
@@ -3996,33 +3828,28 @@ def get_data_obj(ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, para
 		input_dim = vals.size(-1)
 
 		batch_size = min(min(len(train_data), param_dics['batch_size']), n_samples)
-		data_min, data_max = get_data_min_max(total_dataset, dataset = dataset, device = device, check_extrapolation = check_extrapolation)
-		# breakpoint()
+		data_min, data_max = utils.get_data_min_max(total_dataset, dataset = dataset, device = device, check_extrapolation = check_extrapolation)
 
 		train_dataloader = DataLoader(train_data, batch_size= batch_size, shuffle=False, 
-			collate_fn= lambda batch: variable_time_collate_fn_survival(batch, device, data_type = "train",
-				data_min = data_min, data_max = data_max, dataset = dataset, max_time = max_time, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
+			collate_fn= lambda batch: utils.variable_time_collate_fn_survival(batch, device, data_type = "train",
+				data_min = data_min, data_max = data_max, dataset = dataset, max_pred_window = max_pred_window, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
 		
-		train_dataloader_baseline = DataLoader(train_data, batch_size= len(train_data), shuffle=False, 
-			collate_fn= lambda batch: variable_time_collate_fn_survival(batch, device, data_type = "train",
-				data_min = data_min, data_max = data_max, dataset = dataset, max_time = max_time, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
+		train_dataloader_full_batch = DataLoader(train_data, batch_size= len(train_data), shuffle=False, 
+			collate_fn= lambda batch: utils.variable_time_collate_fn_survival(batch, device, data_type = "train",
+				data_min = data_min, data_max = data_max, dataset = dataset, max_pred_window = max_pred_window, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
 
 		valid_dataloader = DataLoader(valid_data, batch_size = batch_size*2, shuffle=False, 
-			collate_fn= lambda batch: variable_time_collate_fn_survival(batch, device, data_type = "test",
-				data_min = data_min, data_max = data_max, dataset = dataset, max_time = max_time, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
+			collate_fn= lambda batch: utils.variable_time_collate_fn_survival(batch, device, data_type = "test",
+				data_min = data_min, data_max = data_max, dataset = dataset, max_pred_window = max_pred_window, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
 
-		# test_dataloader = DataLoader(test_data, batch_size = n_samples, shuffle=False, 
-		# 	collate_fn= lambda batch: utils.variable_time_collate_fn_survival(batch, device, data_type = "test",
-		# 		data_min = data_min, data_max = data_max, dataset = dataset, max_time = max_time))
 
-		data_objects = {"train_dataloader": inf_generator(train_dataloader), 
-						"train_dataloader_cox": inf_generator(train_dataloader_baseline),
-						"valid_dataloader": inf_generator(valid_dataloader),
+		data_objects = {"train_dataloader": utils.inf_generator(train_dataloader), 
+						"train_dataloader_full_batch": utils.inf_generator(train_dataloader_full_batch),
+						"valid_dataloader": utils.inf_generator(valid_dataloader),
 						"input_dim": input_dim,
 						"n_train_batches": len(train_dataloader),
 						"n_valid_batches": len(valid_dataloader),
 						"attr": feat_names if feat_reconstr is None else feat_reconstr} #optional
-		# breakpoint()
 		return data_objects, (data_min, data_max)
 	elif process_test_set:
 		# for test set 
@@ -4030,12 +3857,14 @@ def get_data_obj(ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, para
 		n_samples = len(total_dataset)
 		input_dim = vals.size(-1)
 
+		# use min-max values from the training sets
 		data_min, data_max = min_max_tuple
-		test_dataloader = DataLoader(total_dataset, batch_size = n_samples, shuffle=False, 
-			collate_fn= lambda batch: variable_time_collate_fn_survival(batch, device, data_type = "test",
-			data_min = data_min, data_max = data_max, dataset = dataset, max_time = max_time, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
 
-		data_objects = {"test_dataloader": inf_generator(test_dataloader),
+		test_dataloader = DataLoader(total_dataset, batch_size = n_samples, shuffle=False, 
+			collate_fn= lambda batch: utils.variable_time_collate_fn_survival(batch, device, data_type = "test",
+			data_min = data_min, data_max = data_max, dataset = dataset, max_pred_window = max_pred_window, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
+
+		data_objects = {"test_dataloader": utils.inf_generator(test_dataloader),
 						"input_dim": input_dim,
 						"n_test_batches": len(test_dataloader),
 						"attr": feat_names if feat_reconstr is None else feat_reconstr} #optional
