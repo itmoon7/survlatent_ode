@@ -1,3 +1,5 @@
+##We'll release more examples with public datasets soon. Stay tuned!
+
 ## SurvLatent ODE
 
 Abstract : Effective learning from electronic health records (EHR) data for prediction of clinical outcomes is often challenging because of features recorded at irregular timesteps and loss to follow-up as well as competing events such as death or disease progression. To that end, we propose a generative time-to-event model, SurvLatent ODE, which adopts an Ordinary Differential Equation-based Recurrent Neural Networks (ODE-RNN) as an encoder to effectively parameterize a latent representation under irregularly sampled data. Our model then utilizes the latent representation to flexibly estimate survival times for multiple competing events without specifying shapes of event-specific hazard function. We demonstrate competitive performance of our model on MIMIC-III, a freely-available longitudinal dataset collected from critical care units, on predicting hospital mortality as well as the in-house data on predicting onset of Deep Vein Thrombosis (DVT), a life-threatening complication for patients with cancer, with death as a competing event. SurvLatent ODE outperforms the current clinical standard Khorana Risk scores for stratifying DVT risk groups.
@@ -9,4 +11,3 @@ The ODE-RNN encoder parametrizes a patient-specific temporal trajectory of covar
 
 <!-- <img src="https://render.githubusercontent.com/render/math?math=x_{1,2} = \frac{-b \pm \sqrt{b^2-4ac}}{2b}"> -->
 
-We'll release more examples with public datasets soon.
