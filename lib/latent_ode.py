@@ -235,35 +235,14 @@ class LatentODE(nn.Module):
 		# breakpoint()
 		n_feats_per_plot = np.shape(observed_data)[2] if np.shape(observed_data)[2] < 10 else 10
 		self._plot_recons_traj(observed_data, pred_data, pred_data_extr, batch_dict['data_extra_info'], mask = observed_mask, filename_suffix = filename_suffix, feat_names = feat_names, curr_epoch = curr_epoch, min_event_time = min_event_time, n_feats_per_plot = n_feats_per_plot)
-
-		# breakpoint()
 		return
 
-	def compute_all_losses(self, batch_dict, n_latent_traj = 1, kl_coef = 1., surv_est = None, survival_loss_scale = 10, reconstr_info = None):
-		# if survival or reconstr_only:
-		# breakpoint()
-		# start_time = time.time()
-
-		# breakpoint()
-		# # ================================================================================================
-		# # before computing the loss, remove the time points where there are no observations in this batch
-		# non_missing_tp = torch.sum(batch_dict["observed_data"],(0,2)) != 0.
-		# batch_dict["observed_data"] = batch_dict["observed_data"][:, non_missing_tp]
-		# batch_dict["observed_mask"] = batch_dict["observed_mask"][:, non_missing_tp]
-		# batch_dict["observed_tp"] = batch_dict["observed_tp"][non_missing_tp]
-		# batch_dict["observed_tp_unnorm"] = batch_dict["observed_tp_unnorm"][non_missing_tp]
-
-		# non_missing_tp_pred = torch.sum(batch_dict["data_to_predict"],(0,2)) != 0.
-		# batch_dict["data_to_predict"] = batch_dict["data_to_predict"][:, non_missing_tp_pred]
-		# batch_dict["mask_predicted_data"] = batch_dict["mask_predicted_data"][:, non_missing_tp_pred]
-		# # ================================================================================================
-		# breakpoint()
-
+	def compute_all_losses(self, batch_dict, n_latent_traj = 1, kl_coef = 1., surv_est = None, survival_loss_scale = 10, reconstr_info = None):	
+	
 		if reconstr_info is None:
 			pred_y_mult_traj, hazards_y_mult_traj, info = self.get_reconstruction_survival(batch_dict["tp_to_predict"], 
 																						   batch_dict["observed_data"], batch_dict["observed_tp"], batch_dict['end_of_obs_idx'],
 																						   mask = batch_dict["observed_mask"], n_latent_traj = n_latent_traj, temporal_encoding = self.temporal_encoding)
-			# breakpoint()
 		else:
 			pred_y_mult_traj, hazards_y_mult_traj, info = reconstr_info[0], reconstr_info[1], reconstr_info[2]
 		# if n_latent_traj > 1:
@@ -303,42 +282,18 @@ class LatentODE(nn.Module):
 		kldiv_z0 = torch.mean(kldiv_z0,(1,2))
 
 		# Compute likelihood of all the points
-		# breakpoint()
-		rec_likelihood = utils.get_gaussian_likelihood(batch_dict["data_to_predict"], pred_y, mask = batch_dict["mask_predicted_data"], obsrv_std = self.obsrv_std) #  prev : mask = batch_dict["mask_predicted_data"]
-
-		# get ranking loss
-		# if validation:
-		# 	# don't compute ranking loss for validation ...
-		# 	ranking_loss = 0.0
-		# else:
-		# 	ranking_loss = 0.0#utils.get_ranking_loss(hazards_y, batch_dict, surv_est = surv_est)
-		
-		# breakpoint()
+		rec_likelihood = utils.get_gaussian_likelihood(batch_dict["data_to_predict"], pred_y, mask = batch_dict["mask_predicted_data"], obsrv_std = self.obsrv_std) 
 		surv_likelihood = utils.get_survival_likelihood(hazards_y, batch_dict, surv_est = surv_est, n_events = self.n_events)
 
-		# IWAE loss
-		# ORIG :
 		loss = - torch.logsumexp(rec_likelihood -  kl_coef * kldiv_z0,0)
 		if torch.isnan(loss):
 			loss = - torch.mean(rec_likelihood - kl_coef * kldiv_z0,0)
 		
-		# new 1-19-2021 : note surv_likelihood already multiplied by one
-		# loss = - torch.logsumexp(rec_likelihood - surv_likelihood -  kl_coef * kldiv_z0,0)
-		# if torch.isnan(loss):
-		# 	loss = - torch.mean(rec_likelihood - surv_likelihood - kl_coef * kldiv_z0,0)
-			
-		# print('Reconstruction loss : ', loss)
-		# orig :
-		loss = loss + surv_likelihood * survival_loss_scale # use 10 
-		
-
-		# print('Survival likelihood : ', surv_likelihood)
-		# print('ranking_loss : ', ranking_loss)
-
+		loss = loss + surv_likelihood * survival_loss_scale 
 		results = {}
 		results["loss"] = torch.mean(loss)
-		results["survival_loss"] = torch.mean(surv_likelihood).detach()
-		results["likelihood"] = torch.mean(rec_likelihood).detach()
+		results["survival_loss"] = -1*torch.mean(surv_likelihood).detach()
+		results["likelihood"] = -1*torch.mean(rec_likelihood).detach()
 		if surv_est == 'Softmax' or surv_est == 'Hazard': # latent ode nonparam
 			if n_latent_traj > 1:
 				results["hazards_y"] = hazards_y_mult_traj
