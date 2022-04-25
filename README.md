@@ -10,4 +10,13 @@ Abstract : Effective learning from electronic health records (EHR) data for pred
 The ODE-RNN encoder parametrizes a patient-specific temporal trajectory of covariates $x_i(0),...,x_i(p)$ into the latent embedding and describes approximate posterior over the initial latent variable $z_{i,0}$. The sampled initial latent variable $z_{i,0}$ is then decoded into the latent trajectory, $z_i^{t_m}  = (z_{i,1}, z_{i,2}, ..., z_{i,t_m})$ by calling a black-box differential equation solver ODESolve$(g_{\phi}, z_{i,0}, t = 0, ...,t_m)$. Finally, $m_\beta(\cdot)$, which consists of cause-specific decoder modules, subsequent fully connected layer, and softmax layer, maps the corresponding latent trajectory to estimate cause-specific hazard function for each event.
 
 <!-- <img src="https://render.githubusercontent.com/render/math?math=x_{1,2} = \frac{-b \pm \sqrt{b^2-4ac}}{2b}"> -->
+#### Citation :
+@misc{moon2022survlatent,
+      title={SurvLatent ODE : A Neural ODE based time-to-event model with competing risks for longitudinal data improves cancer-associated Deep Vein Thrombosis (DVT) prediction}, 
+      author={Intae Moon and Stefan Groha and Alexander Gusev},
+      year={2022},
+      eprint={2204.09633},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
+}
 
