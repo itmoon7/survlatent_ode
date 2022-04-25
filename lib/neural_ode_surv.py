@@ -104,26 +104,22 @@ class LatentODESub(LatentODE):
 	def get_min_max_data(self):
 		return self.min_max_tuple
 
-	def process_test_data(self, data, data_info_dic, batch_size = 100, max_pred_window = None, n_samples = None, dataset = 'general', run_id = None, include_test_set = False, feat_reconstr = None, check_extrapolation = False, model_info = None):
-		# set random seed and experiment ID
-		random_seed = 1991
-		experimentID = None
-		# save_path = 'experiments/'
+	def process_eval_data(self, data, data_info_dic, batch_size = 100, max_pred_window = None, n_samples = None, dataset = 'general', run_id = None, include_test_set = False, feat_reconstr = None, check_extrapolation = False, model_info = None, random_seed = 0):
+		
+		self.random_seed = random_seed
 		self.check_extrapolation = check_extrapolation
 		self.dataset = dataset
 		# load training data stats
 		self.min_max_tuple = model_info['min_max_data_tuple']
 		self.max_obs_time = model_info['max_obs_time']
 		
-		torch.manual_seed(random_seed)
-		np.random.seed(random_seed)
-
-		ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, _ = utils.pre_process_data(data, data_info_dic, n_events = self.n_events, dataset = dataset, n_samples = n_samples, max_pred_window = max_pred_window)
 		param_dics = {}
 		param_dics['batch_size'] = batch_size
 
-		data_obj = utils.get_data_obj(ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, param_dics, max_obs_time = self.max_obs_time, device = self.device, dataset = dataset, feat_reconstr = feat_reconstr, max_pred_window = max_pred_window, process_test_set = True, min_max_tuple = self.min_max_tuple)
-		
+		# torch.manual_seed(random_seed)
+		# np.random.seed(random_seed)
+		data_obj = utils.get_data_obj_merged(None, data, data_info_dic, process_eval_set = True, device = self.device, feat_reconstr = feat_reconstr, max_pred_window = max_pred_window, n_events = self.n_events, random_seed = self.random_seed, param_dics = param_dics, min_max_tuple = self.min_max_tuple, max_obs_time = self.max_obs_time)
+
 		return utils.remove_timepoints_wo_obs(utils.get_next_batch(data_obj["test_dataloader"]))
 
 	def get_test_data_dic(self, filename_suffix = None):
@@ -139,10 +135,11 @@ class LatentODESub(LatentODE):
 			return self.test_batch_dict
 		
 
-	def fit(self, data, data_info_dic, device = None, n_epochs = 30, batch_size = 50, lr = 1e-2, max_pred_window = None, n_samples = None, run_id = None, include_test_set = False, surv_loss_scale = 10, n_latent_traj = 1, early_stopping = False, survival_loss_exp = True, train_info = None, feat_reconstr = None, check_extrapolation = False, wait_until_full_surv_loss = 15, dataset = 'general', random_seed = 0):
+	def fit(self, data_train, data_valid, data_info_dic, device = None, n_epochs = 30, batch_size = 50, lr = 1e-2, max_pred_window = None, n_samples = None, run_id = None, surv_loss_scale = 10, n_latent_traj = 1, early_stopping = False, survival_loss_exp = True, train_info = None, feat_reconstr = None, check_extrapolation = False, wait_until_full_surv_loss = 15, dataset = 'general', random_seed = 0):
 		# check extrapolation
 		self.check_extrapolation = check_extrapolation
 		self.dataset = dataset
+		self.random_seed = random_seed
 
 		# set random seed and experiment ID
 		experimentID = None
@@ -164,122 +161,48 @@ class LatentODESub(LatentODE):
 		param_dics['units_gru'] = self.units_gru
 		param_dics['attn_num_heads'] = self.attn_num_heads
 
-		# TODO : potentially merge the below two : pre_process_data, get_data_obj
-
-		ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, self.max_obs_time = utils.pre_process_data(data, data_info_dic, n_samples = n_samples, max_pred_window = max_pred_window, include_test_set = include_test_set, n_events = self.n_events, dataset = self.dataset, random_seed = random_seed)
-		# create data objects
-		data_obj, self.min_max_tuple = utils.get_data_obj(ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, param_dics, device = self.device, feat_reconstr = feat_reconstr, max_pred_window = max_pred_window, include_test_set = include_test_set, check_extrapolation = self.check_extrapolation, dataset = self.dataset, max_obs_time = self.max_obs_time, random_seed = random_seed)
+		data_obj, self.min_max_tuple, self.max_obs_time = utils.get_data_obj_merged(data_train, data_valid, data_info_dic, device = self.device, feat_reconstr = feat_reconstr, max_pred_window = max_pred_window, n_events = self.n_events, random_seed = self.random_seed, param_dics = param_dics)
+		# breakpoint()
 		param_dics['input_dim'] = data_obj["input_dim"]
-		
-		batch_dict = utils.get_next_batch(data_obj["train_dataloader_full_batch"])		
 		utils.train_surv_model(self, data_obj, param_dics, 
 							   device = self.device, surv_est = self.surv_est, 
 							   max_pred_window = max_pred_window, run_id = run_id, dataset = dataset, survival_loss_scale = surv_loss_scale, n_latent_traj = n_latent_traj, early_stopping = early_stopping, survival_loss_exp = survival_loss_exp, train_info = train_info, n_events = self.n_events, wait_until_full_surv_loss = wait_until_full_surv_loss)
 		return
 
-	def get_surv_prob(self, data, data_info_dic, batch_dict = None, model_info = None, max_pred_window = None, dataset = 'mimic', filename_suffix = None, device = None, n_latent_traj = 1, credible_interval = False, test_batch_size = 200, reconstr_loss = False, export_latent_states = False, n_samples_surv_curv = 500, n_events = 1):
-	
-		if credible_interval and n_latent_traj == 1:
-			raise ValueError('n_latent_traj must be greater than 1 to obtain credible interval')
-		elif not credible_interval and n_latent_traj > 1:
-			raise ValueError('Must set credible_interval to True when evaluating more than one trajectory')
-
-		if batch_dict is None:
-			# convert data into dataloader format 
-			ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names = self._pre_process_data(data, data_info_dic, max_pred_window = max_pred_window, dataset = dataset)
-
-			data_obj, _ = self._get_data_obj(ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, None, 
-											 dataset = dataset, device = self.device, max_pred_window = max_pred_window, min_max_tuple = model_info['min_max_data_tuple'], process_test_set = True)
-
-			# get hazards and prediction
-			batch_dict = utils.get_next_batch(data_obj["test_dataloader"])
-			self.test_batch_dict = batch_dict
+	def get_surv_prob(self, batch_dict, model_info = None, max_pred_window = None, filename_suffix = None, device = None, test_batch_size = 200, reconstr_loss = False, n_events = 1):
 		
-		# compute surv prob
 		last_observed_points = batch_dict['end_of_obs_idx'] # auxiliary info for plotting
 		num_samples = len(batch_dict['sample_ids'])
-		# for j in range(num_samples):
-		# 	last_observed_point = batch_dict['observed_tp_unnorm'][batch_dict['observed_mask'][j].sum(axis = 1) > 0][-1]
-		# 	last_observed_points.append(last_observed_point)
-
 	
 		batch_total_observed_data = utils.divide_list(batch_dict["observed_data"], test_batch_size)
 		batch_total_observed_mask = utils.divide_list(batch_dict["observed_mask"], test_batch_size)
 		batch_total_end_obs_idx = utils.divide_list(batch_dict["end_of_obs_idx"], test_batch_size)
-		# batch_total_sample_ids = utils.divide_list(batch_dict["sample_ids"], test_batch_size)
-
-		# breakpoint()
-		# =======================================================================================
-		print('Getting latent states of test data...')			
+		
 		init_flag = True; count = 0;
 		for i in range(len(batch_total_observed_data)):
 			pred_y_, hazards_y, info = self.get_reconstruction_survival(batch_dict["tp_to_predict"], 
 																batch_total_observed_data[i], batch_dict["observed_tp"], batch_total_end_obs_idx[i], 
 																mask = batch_total_observed_mask[i], get_latent_hazard = True, temporal_encoding = self.temporal_encoding)
-			# breakpoint()
 			latent_states = info['latent_hazard']
 			if init_flag:
 				init_flag = False
 			else:
 				hazards_y = torch.cat((prev_hazards_y, hazards_y), 1)
 				pred_y_ = torch.cat((prev_pred_y, pred_y_), 1)
-				latent_states = prev_latent_states + latent_states#torch.cat((prev_latent_states, latent_states), 0)
-				# sample_ids = sample_ids + 
+				latent_states = prev_latent_states + latent_states
 			prev_pred_y = pred_y_.detach()
 			prev_latent_states = latent_states
-			# if n_events == 1:
 			prev_hazards_y = hazards_y.detach()	
-			# prev_sample_ids = batch_total_sample_ids[i]
-		print('Complete!')
-		if export_latent_states:
-			f = open('model_performance/' + filename_suffix + '/latent_states_test_set.pkl', "wb") # prev : ckp_sig_feats_dic_Jan_21th_2021_binary_wo_duplicates_thresh_0_10, ckp_sig_feats_dic_Nov_13th_binary_mut_burden, ckp_sig_feats_dic_Nov_13th_binary, ckp_sig_feats_dic_Sep_25th_binary
-			pickle.dump(latent_states,f)
-			f.close()
-
-			with open('model_performance/' + filename_suffix + '/test_sample_ids.npy', 'wb') as f:
-				np.save(f, batch_dict["sample_ids"])
-
-			# export data prediction as well 				
-			np.save('model_performance/' + filename_suffix + '/test_data_pred.npy', pred_y_[0].cpu().detach().numpy())
-
-		# =======================================================================================
+	
+		pred_y = pred_y_[:, :, :batch_dict["max_end_of_obs_idx"] + 1, :] #, pred_y[:, :, batch_dict["max_end_of_obs_idx"]:, :]
+		pred_y = torch.index_select(pred_y, 2, batch_dict['observed_tp_unnorm_dec'].int())#[:, :, batch_dict['non_missing_tp_pred'], :] 
 		
-		# breakpoint()
-		if self.check_extrapolation:
-			pred_y, pred_y_extr = pred_y_[:, :, :batch_dict["max_end_of_obs_idx"] + 1, :], pred_y_[:, :, batch_dict["max_end_of_obs_idx"] + 1:, :]
-			pred_y = torch.index_select(pred_y, 2, batch_dict['observed_tp_unnorm_dec'].int())#[:, :, batch_dict['non_missing_tp_pred'], :] # choose the relevent time points for reconstruction loss
-		else:
-			pred_y = pred_y_[:, :, :batch_dict["max_end_of_obs_idx"] + 1, :] #, pred_y[:, :, batch_dict["max_end_of_obs_idx"]:, :]
-			pred_y = torch.index_select(pred_y, 2, batch_dict['observed_tp_unnorm_dec'].int())#[:, :, batch_dict['non_missing_tp_pred'], :] 
-		
-		if reconstr_loss:
-			fp_mu, fp_std, fp_enc = info["first_point"]
-			fp_std = fp_std.abs()
-			fp_distr = Normal(fp_mu, fp_std)
-
-			assert(torch.sum(fp_std < 0) == 0.)
-
-			kldiv_z0 = kl_divergence(fp_distr, self.z0_prior) # ~ N(0,1)
-
-			if torch.isnan(kldiv_z0).any():
-				print(fp_mu)
-				print(fp_std)
-				raise Exception("kldiv_z0 is Nan!")
-
-			# Mean over number of latent dimensions
-			kldiv_z0 = torch.mean(kldiv_z0,(1,2))
-
-			# Compute likelihood of all the points
-			rec_likelihood = utils.get_gaussian_likelihood(batch_dict["data_to_predict"], pred_y, mask = batch_dict["mask_predicted_data"], obsrv_std = self.obsrv_std)			
-			if n_events == 1:
-				surv_prob = self._get_surv_prob(hazards_y, batch_dict, last_observed_points, max_pred_window = max_pred_window, filename_suffix = filename_suffix, events_info_train_tuple = model_info['events_info_train_tuple'], n_events = n_events)
-				return surv_prob, rec_likelihood
-			else:	
-				ef_surv_prob, cs_cif_total = self._get_surv_prob(hazards_y, batch_dict, last_observed_points, max_pred_window = max_pred_window, filename_suffix = filename_suffix, events_info_train_tuple = model_info['events_info_train_tuple'], n_events = n_events)
-				# breakpoint()
-				return ef_surv_prob, cs_cif_total, rec_likelihood
-		else:
-			return self._get_surv_prob(hazards_y, batch_dict, last_observed_points, max_pred_window = max_pred_window, filename_suffix = filename_suffix, events_info_train_tuple = model_info['events_info_train_tuple'], n_events = n_events)
+		if n_events == 1:
+			surv_prob = self._get_surv_prob(hazards_y, batch_dict, last_observed_points, max_pred_window = max_pred_window, filename_suffix = filename_suffix, events_info_train_tuple = model_info['events_info_train_tuple'], n_events = n_events)
+			return surv_prob
+		else:	
+			ef_surv_prob, cs_cif_total = self._get_surv_prob(hazards_y, batch_dict, last_observed_points, max_pred_window = max_pred_window, filename_suffix = filename_suffix, events_info_train_tuple = model_info['events_info_train_tuple'], n_events = n_events)
+			return ef_surv_prob, cs_cif_total
 
 	def get_reconst_traj(self, batch_dict = None, n_latent_traj = 1, credible_interval = False):
 		"""

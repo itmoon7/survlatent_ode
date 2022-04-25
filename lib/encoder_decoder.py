@@ -257,57 +257,19 @@ class Encoder_z0_ODE_RNN(nn.Module):
 		if len(time_steps) == 1:
 			prev_y = torch.zeros((1, n_traj, self.latent_dim)).to(self.device)
 			prev_std = torch.zeros((1, n_traj, self.latent_dim)).to(self.device)
-
 			xi = data[:,0,:].unsqueeze(0)
-
 			last_yi, last_yi_std = self.GRU_update(prev_y, prev_std, xi)
 			extra_info = None
 		else:
-			# if not self.model_hazard:
 			last_yi, last_yi_std, latent_ys, latent_ys_std, extra_info = self.run_odernn(
 																			data, time_steps, run_backwards = run_backwards,
 																			save_info = save_info)
-			# # else:
-			# last_yi, last_yi_std, last_yi_haz, last_yi_haz_std, _, extra_info = self.run_odernn(
-			# 	data, time_steps, run_backwards = run_backwards,
-			# 	save_info = save_info)
-
-		# apply attention :
-		# breakpoint()
-		if self.attention:
-			# pass
-			# breakpoint()
-			latent_ys_concat = torch.cat((latent_ys, latent_ys_std), -1)
-			scores_ys = self.attention_layer(latent_ys_concat.permute(0,2,1,3))
-			alpha_ys = torch.softmax(scores_ys, dim = 2)
-
-			# permute alpha matrix for matrix mul.
-			result = torch.matmul(alpha_ys.permute(0,1,3,2), latent_ys_concat.permute(0,2,1,3)).reshape((1,np.shape(latent_ys_concat)[2],np.shape(latent_ys_concat)[3]))
-			means_z0, std_z0 = utils.split_last_dim(result)
-			# scores_ys_std = self.attention_layer(latent_ys.permute(0,2,1,3))
-			# breakpoint()
-
-		else:
-			means_z0 = last_yi.reshape(1, n_traj, self.latent_dim) # [1,50,40]
-			std_z0 = last_yi_std.reshape(1, n_traj, self.latent_dim) # [1,50,40]
-		# breakpoint()
+		means_z0 = last_yi.reshape(1, n_traj, self.latent_dim) # [1,50,40]
+		std_z0 = last_yi_std.reshape(1, n_traj, self.latent_dim) # [1,50,40]
 		mean_z0, std_z0 = utils.split_last_dim( self.transform_z0( torch.cat((means_z0, std_z0), -1))) # transform z0
-		std_z0 = std_z0.abs() # [1,50,20], [1,50,20]
-
-		# apply attention 
-
+		std_z0 = std_z0.abs() 
 		if save_info:
 			self.extra_info = extra_info
-
-		# if self.model_hazard:
-		# 	means_z0_haz = last_yi_haz.reshape(1, n_traj, self.z0_dim_haz)
-		# 	std_z0_haz = last_yi_haz_std.reshape(1, n_traj, self.z0_dim_haz)
-
-		# 	mean_z0_haz, std_z0_haz = utils.split_last_dim( self.transform_z0_hazard( torch.cat((means_z0_haz, std_z0_haz), -1)))
-		# 	std_z0_haz = std_z0_haz.abs()
-		# 	mean_z0_haz = mean_z0_haz.abs()
-		# 	return mean_z0_haz, std_z0_haz, mean_z0_haz, std_z0_haz
-
 		return mean_z0, std_z0
 
 
@@ -327,16 +289,10 @@ class Encoder_z0_ODE_RNN(nn.Module):
 		prev_y = torch.zeros((1, n_traj, self.latent_dim)).to(device) 
 		prev_std = torch.zeros((1, n_traj, self.latent_dim)).to(device)
 
-		# if self.model_hazard:
-		# 	prev_y_hazard = torch.zeros((1, n_traj, self.z0_dim_haz)).to(device) # hazard dimension is one 
-		# 	prev_std_hazard = torch.zeros((1, n_traj, self.z0_dim_haz)).to(device)
-
 		prev_t, t_i = time_steps[-1] + 0.01,  time_steps[-1]
 
 		interval_length = time_steps[-1] - time_steps[0]
 		minimum_step = interval_length / 50 # prev it was 50
-
-		#print("minimum step: {}".format(minimum_step))
 
 		assert(not torch.isnan(data).any())
 		assert(not torch.isnan(time_steps).any())
@@ -347,32 +303,16 @@ class Encoder_z0_ODE_RNN(nn.Module):
 		if run_backwards:
 			time_points_iter = reversed(time_points_iter)
 
-		# breakpoint()
 		for i in time_points_iter:
 			if (prev_t - t_i) < minimum_step: # small time gap between observations
 				time_points = torch.stack((prev_t, t_i))
 				inc = self.z0_diffeq_solver.ode_func(prev_t, prev_y) * (t_i - prev_t)
 
 				assert(not torch.isnan(inc).any())
-
-				# just do prev value + area associated with small delta
 				ode_sol = prev_y + inc 
 				ode_sol = torch.stack((prev_y, ode_sol), 2).to(device)
 
 				assert(not torch.isnan(ode_sol).any())
-
-				# if self.model_hazard:
-				# 	# prev_y_hazard = self.decoder_hazard(prev_y)
-				# 	# breakpoint()
-				# 	inc_hazard = self.z0_diffeq_solver_hazard.ode_func(prev_t, prev_y_hazard) * (t_i - prev_t)
-
-				# 	assert(not torch.isnan(inc_hazard).any())
-
-				# 	# just do prev value + area associated with small delta
-				# 	ode_sol_hazard = prev_y_hazard + inc_hazard 
-				# 	ode_sol_hazard = torch.stack((prev_y_hazard, ode_sol_hazard), 2).to(device)
-
-				# 	assert(not torch.isnan(ode_sol_hazard).any())
 			else: # large time gap between observations
 				n_intermediate_tp = max(2, ((prev_t - t_i) / minimum_step).int())
 
@@ -381,33 +321,15 @@ class Encoder_z0_ODE_RNN(nn.Module):
 
 				assert(not torch.isnan(ode_sol).any())
 
-				# if self.model_hazard:
-				# 	# prev_y_hazard = self.decoder_hazard(prev_y)
-				# 	ode_sol_hazard = self.z0_diffeq_solver_hazard(prev_y_hazard, time_points) # z0_diffeq_solver is a class of DiffeqSolver
-
-				# 	assert(not torch.isnan(ode_sol_hazard).any())
-
-					# breakpoint()
-
 			if torch.mean(ode_sol[:, :, 0, :]  - prev_y) >= 0.001:
 				print("Error: first point of the ODE is not equal to initial value")
 				print(torch.mean(ode_sol[:, :, 0, :]  - prev_y))
 				exit()
-			#assert(torch.mean(ode_sol[:, :, 0, :]  - prev_y) < 0.001)
-			# if self.model_hazard:
-			# 	if torch.mean(ode_sol_hazard[:, :, 0, :]  - prev_y_hazard) >= 0.001:
-			# 		print("Error: first point of the ODE is not equal to initial value")
-			# 		print(torch.mean(ode_sol_hazard[:, :, 0, :]  - prev_y_hazard))
-			# 		exit()
 
 			yi_ode = ode_sol[:, :, -1, :]
 			xi = data[:,i,:].unsqueeze(0)
 			
-			# breakpoint()
 			yi, yi_std = self.GRU_update(yi_ode, prev_std, xi) 
-			# if self.model_hazard:
-			# 	y_hazard, y_hazard_std = self.decoder_hazard(yi), self.decoder_hazard(yi_std)
-			# 	prev_y_hazard, prev_std_hazard = y_hazard, y_hazard_std	
 			prev_y, prev_std = yi, yi_std		
 			prev_t, t_i = time_steps[i],  time_steps[i-1]
 
@@ -426,9 +348,6 @@ class Encoder_z0_ODE_RNN(nn.Module):
 		assert(not torch.isnan(yi).any())
 		assert(not torch.isnan(yi_std).any())
 
-		# if self.model_hazard:
-		# 	return yi, yi_std, y_hazard, y_hazard_std, latent_ys, extra_info
-		# else:
 		return yi, yi_std, latent_ys, latent_ys_std, extra_info
 
 

@@ -245,16 +245,10 @@ class LatentODE(nn.Module):
 																						   mask = batch_dict["observed_mask"], n_latent_traj = n_latent_traj, temporal_encoding = self.temporal_encoding)
 		else:
 			pred_y_mult_traj, hazards_y_mult_traj, info = reconstr_info[0], reconstr_info[1], reconstr_info[2]
-		# if n_latent_traj > 1:
 		if n_latent_traj > 1:
-			# print("--- get_reconstruction_surv : %s seconds ---" % (time.time() - start_time))
-			# breakpoint()
 			pred_y_ = pred_y_mult_traj[0][None, :, :, :]
 			hazards_y = hazards_y_mult_traj[0][None, :, :, :]
 		else:
-			# if surv_est == 'Hazard':
-			# 	hazards_y_mult_traj = self.learnedsoftplus(hazards_y_mult_traj)
-				# breakpoint()
 			pred_y_ = pred_y_mult_traj
 			hazards_y = hazards_y_mult_traj
 	
@@ -327,28 +321,17 @@ class LatentODE(nn.Module):
 			truth_w_mask = truth
 			if mask is not None:
 				truth_w_mask = torch.cat((truth, mask), -1)
-			# if survival_mode_num == 5:
-			# 	first_point_mu, first_point_std, first_point_mu_haz, first_point_std_haz = self.encoder_z0(truth_w_mask, truth_time_steps, run_backwards = run_backwards)
-			# else:
 			first_point_mu, first_point_std = self.encoder_z0(truth_w_mask, truth_time_steps, run_backwards = run_backwards)
 
 			means_z0 = first_point_mu#.repeat(1, 1, 1)
 			sigma_z0 = first_point_std#.repeat(1, 1, 1)
-			# breakpoint()
-			first_point_enc = utils.sample_standard_gaussian(first_point_mu, first_point_std, n_latent_traj = n_latent_traj)				
+			first_point_enc = utils.sample_standard_gaussian(first_point_mu, first_point_std, n_latent_traj = n_latent_traj, random_seed = self.random_seed)				
 		else:
 			raise Exception("Unknown encoder type {}".format(type(self.encoder_z0).__name__))
 		
 		first_point_std = first_point_std.abs() + eps # to prevent zero std.
 		assert(torch.sum(first_point_std < 0) == 0.)
 
-		# if self.use_poisson_proc:
-		# 	n_traj_samples, n_traj, n_dims = first_point_enc.size()
-		# 	# append a vector of zeros to compute the integral of lambda
-		# 	zeros = torch.zeros([n_traj_samples, n_traj,self.input_dim]).to(get_device(truth))
-		# 	first_point_enc_aug = torch.cat((first_point_enc, zeros), -1)
-		# 	means_z0_aug = torch.cat((means_z0, zeros), -1)
-		# else:
 		first_point_enc_aug = first_point_enc
 		means_z0_aug = means_z0
 			
@@ -358,84 +341,20 @@ class LatentODE(nn.Module):
 
 		# Shape of sol_y [n_traj_samples, n_samples, n_timepoints, n_latents]
 		sol_y = self.diffeq_solver(first_point_enc_aug, time_steps_to_predict)
-		if self.attention_aug:
-			masks_total = []
-			for t in range(len(time_steps_to_predict)): # from 0 to pred_time
-				masks_total.append([1]*(t+1) + [0]*(len(time_steps_to_predict) - t - 1))
-			masks_total = torch.tensor(masks_total).bool().to(utils.get_device(truth))
-			if get_multiple_traj:
-				# !! this only should be used for evaluation !!
-				# breakpoint()
-				# print('Getting hazards and covariate predictions...')
-				sol_y_batches = utils.divide_list(sol_y[0], test_batch_size); init_flag = True
-				for sol_y_ in sol_y_batches:
-					# breakpoint()
-					hidden_y_hazard = self.attention_decoder(sol_y_, mask = masks_total)
-					hidden_y_data = self.attention_decoder_data(sol_y_, mask = masks_total)
-					if init_flag:
-						init_flag = False
-					else:
-						hidden_y_hazard = torch.cat((prev_hidden_y_hazard, hidden_y_hazard), 0)
-						hidden_y_data = torch.cat((prev_hidden_y_data, hidden_y_data), 0)
-					prev_hidden_y_hazard = hidden_y_hazard.detach().clone()#.detach()
-					prev_hidden_y_data = hidden_y_data.detach().clone()#.detach()	
-
-					torch.cuda.empty_cache()	
-
-				# print('Complete!')
-				pred_y = self.decoder(hidden_y_data[None,:])
-				hazards_y = self.decoder_surv(hidden_y_hazard[None,:])
-
-			else:
-				# self attention mechanism for data
-				hidden_y_data = self.attention_decoder_data(sol_y[0], mask = masks_total)
-				pred_y = self.decoder(hidden_y_data[None,:])
-				# self attention mechanism for hazard
-				if self.n_events == 2: # for 
-					# for event_idx, (attn_decoder, decoder_) in enumerate(zip(self.attention_decoder, self.decoder_surv)):
-					# 	if event_idx == 0:
-					# 		# latent_hazard = attn_decoder(sol_y[0], mask = masks_total)
-					# 		hazards_y = decoder_(attn_decoder(sol_y[0], mask = masks_total)[None, :])
-					# 	else:
-					# 		hazards_y = torch.cat((hazards_y, decoder_(attn_decoder(sol_y[0], mask = masks_total)[None, :])), dim = 3).to(self.device)
-					hazards_y_1 = self.decoder_surv_1(self.attention_decoder_1(sol_y[0], mask = masks_total)[None, :])
-					hazards_y_2 = self.decoder_surv_2(self.attention_decoder_2(sol_y[0], mask = masks_total)[None, :])
-					hazards_y = torch.cat((hazards_y_1, hazards_y_2), dim = 3).to(self.device)
-					# breakpoint()
-					# merge decoder networks to 3 neurons using a linear function and softmax across last neurons
-					latent_hazard = hazards_y.cpu().detach().clone()
-					hazards_y = torch.softmax(self.merging_decoder(hazards_y), dim = 3)
-					# breakpoint()
-				else:
-					decoder_out = self.attention_decoder(sol_y[0], mask = masks_total)
-					hazards_y = self.decoder_surv(decoder_out[None,:])
-					latent_hazard = decoder_out.cpu().detach().clone()
-		else:
-			# wo attention
-			pred_y = self.decoder(sol_y) # TODO (10-03-21) : instead of using decoder you'd want to use GRU instead 
-			if self.n_events > 1:
-				# hazards_y = []
-				# for decoder_ in self.decoder_surv:
-				# 	hazards_y.append(decoder_(sol_y))
-				if temporal_encoding:
-					positional_encoder = PositionalEncoding(d_model=self.latent_dim).to(self.device)
-					hazards_y_1 = self.decoder_surv_1(positional_encoder(sol_y[0])[None, :])
-					hazards_y_2 = self.decoder_surv_2(positional_encoder(sol_y[0])[None, :])
-					# breakpoint()
-				else:
-					hazards_y_1 = self.decoder_surv_1(sol_y)
-					hazards_y_2 = self.decoder_surv_2(sol_y)
-				hazards_y = torch.cat((hazards_y_1, hazards_y_2), dim = 3).to(self.device)
-				# breakpoint()
-				# merge decoder networks to 3 neurons using a linear function and softmax across last neurons
-				latent_hazard = hazards_y.cpu().detach().clone()
-				hazards_y = torch.softmax(self.merging_decoder(hazards_y), dim = 3)	
-				# breakpoint()
-			else:
-				latent_hazard = sol_y[0].cpu().detach().clone()
-				hazards_y = self.decoder_surv(sol_y)
 		
-		if get_latent_hazard: # get last observaiton time to the 
+		pred_y = self.decoder(sol_y)
+		if self.n_events > 1:
+			hazards_y_1 = self.decoder_surv_1(sol_y)
+			hazards_y_2 = self.decoder_surv_2(sol_y)
+			hazards_y = torch.cat((hazards_y_1, hazards_y_2), dim = 3).to(self.device)
+			# merge decoder networks to 3 neurons using a linear function and softmax across last neurons
+			latent_hazard = hazards_y.cpu().detach().clone()
+			hazards_y = torch.softmax(self.merging_decoder(hazards_y), dim = 3)	
+		else:
+			latent_hazard = sol_y[0].cpu().detach().clone()
+			hazards_y = self.decoder_surv(sol_y)
+		
+		if get_latent_hazard: 
 			latent_hazard_main_event = []
 			if self.n_events == 1:
 				for hazard_per_sample, last_obs_idx in zip(latent_hazard, end_of_obs_idx):
@@ -443,15 +362,14 @@ class LatentODE(nn.Module):
 						last_obs_idx_oi = int(last_obs_idx.cpu().numpy())
 					except:
 						last_obs_idx_oi = int(last_obs_idx)#.cpu().numpy())
-					latent_hazard_main_event.append(hazard_per_sample[last_obs_idx_oi:last_obs_idx_oi + 365, :].numpy()) # note first 5 correspond to the primary event
+					latent_hazard_main_event.append(hazard_per_sample[last_obs_idx_oi:last_obs_idx_oi + 365, :].numpy()) 
 			else:	
 				for hazard_per_sample, last_obs_idx in zip(latent_hazard[0], end_of_obs_idx):
 					try:
 						last_obs_idx_oi = int(last_obs_idx.cpu().numpy())
 					except:
 						last_obs_idx_oi = int(last_obs_idx)#.cpu().numpy())
-					latent_hazard_main_event.append(hazard_per_sample[last_obs_idx_oi:last_obs_idx_oi + 365, :].numpy()) # note first 5 correspond to the primary event
-			# pass
+					latent_hazard_main_event.append(hazard_per_sample[last_obs_idx_oi:last_obs_idx_oi + 365, :].numpy()) 
 		all_extra_info = {
 			"first_point": (first_point_mu, first_point_std, first_point_enc),
 			"latent_traj": sol_y.cpu().detach(),
