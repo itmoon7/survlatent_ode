@@ -545,61 +545,38 @@ def subsample_observed_data(data_dict, n_tp_to_sample = None, n_points_to_cut = 
 
 	return new_data_dict
 
-def compute_loss_all_batches(model,
-	test_dataloader, train_dataloader, valid_dataloader, params_dic, n_batches, n_batches_train, device,
+def compute_loss_all_batches(model, train_dataloader, valid_dataloader, params_dic, n_batches_train, device,
 	n_latent_traj = 1, kl_coef = 1., 
 	max_samples_for_eval = None, plot_survival_curves = False, itr = None, 
 	plot_concord_ibs_across_epoch = True, filename_suffix = None,
-	surv_est = None, dataset = None, bootstrap = False, feat_names = None, max_pred_window = None, min_max_data_tuple = None, survival_loss_scale = 10, optimizer = None, n_events = 1):
+	surv_est = None, dataset = None, bootstrap = False, feat_names = None, max_pred_window = None, min_max_data_tuple = None, survival_loss_scale = 10, optimizer = None, n_events = 1, valid_batch_size = 200):
 
 	curr_epoch = itr // n_batches_train
 	# print('curr_epoch : ', curr_epoch)
 	batch_dict_train = get_next_batch(train_dataloader)
-	
-	for i in tqdm(range(n_batches), desc = 'Loading validation set...'):
+
+	tp_res = 1
+	min_event_time = 1
+	max_event_time = max_pred_window if max_pred_window is not None else 750 # 1000 hours
+
+	### TODO : provide global non_missing_tp and non_missing_tp_pred for entire validation set
+
+	## split validation similar to how you would do in Get Surv!
+	batch_dict = remove_timepoints_wo_obs(get_next_batch(valid_dataloader)) 
+
+	batch_total_observed_data = divide_list(batch_dict["observed_data"], valid_batch_size)
+	batch_total_observed_mask = divide_list(batch_dict["observed_mask"], valid_batch_size)
+	batch_total_end_obs_idx = divide_list(batch_dict["end_of_obs_idx"], valid_batch_size)
+
+	for i in tqdm(range(len(batch_total_observed_data)), desc = 'Loading validation set...'):
 		validation = True 
-		batch_dict = get_next_batch(valid_dataloader)
-		# set event observation time horizon
-		if dataset == 'framingham':
-			tp_res = 1#/30
-			min_event_time = 365#/30
-			max_event_time = 3900#/30#batch_dict['event_times'].max()
-		elif dataset == 'physionet':
-			tp_res = 0.1 #/30 resolution has to be 0.1 in order to account to obrain correct baseline hazard
-			min_event_time = 48#/30
-			max_event_time = 14*24#/30#b
-		elif dataset == 'mimic':
-			tp_res = 1
-			min_event_time = 24#/30
-			max_event_time = max_pred_window if max_pred_window is not None else 750 # 1000 hours
-		else:
-			tp_res = 1
-			min_event_time = 1
-			max_event_time = max_pred_window if max_pred_window is not None else 750 # 1000 hours
+		
 
 		pred_y_mult_traj, hazards_y_mult_traj, info = model.get_reconstruction_survival(batch_dict["tp_to_predict"], 
-																					   batch_dict["observed_data"], batch_dict["observed_tp"], batch_dict['end_of_obs_idx'], 
-																					   mask = batch_dict["observed_mask"], n_latent_traj = n_latent_traj)
+																					   batch_total_observed_data[i], batch_dict["observed_tp"], batch_total_end_obs_idx[i], 
+																					   mask = batch_total_observed_mask[i], n_latent_traj = n_latent_traj)
 		# merge batch dict and result dict
 		if i > 0:
-			for key, data in batch_dict.items():
-				if key in ['sample_ids', 'pred_horizon_idx', 'end_of_obs_idx']:
-					batch_dict[key] = prev_batch_dict[key] + data
-				elif key in ['remaining_time_to_event']:
-					batch_dict[key] = np.concatenate((prev_batch_dict[key], batch_dict[key]), axis = 0)
-				elif key in ['observed_data', 'data_to_predict', 'observed_mask', 'mask_predicted_data', 'mask_surv', 'labels', 'event_time_idx', 'event_times']:
-					batch_dict[key] = torch.cat((prev_batch_dict[key], data), 0)
-				elif key in ['data_extra_info']:
-					if batch_dict[key][0] is not None:
-						batch_dict[key] = (prev_batch_dict[key][0] + data[0], prev_batch_dict[key][1] + data[1], prev_batch_dict[key][2] + data[2])
-				elif key in ['max_end_of_obs_idx']:
-					batch_dict[key] = max(batch_dict[key], prev_batch_dict[key])
-				elif key in ['non_missing_tp', 'non_missing_tp_pred']:
-					batch_dict[key] = batch_dict[key] | prev_batch_dict[key]
-				elif key in ['observed_tp', 'observed_tp_unnorm']:
-					# technically you don't need observed_tp
-					batch_dict[key] = torch.tensor(np.union1d(batch_dict[key].cpu().numpy(), prev_batch_dict[key].cpu().numpy())).to(device)
-
 			# concatenate pred_y_mult_traj, hazards_y_mult_traj, info
 			pred_y_mult_traj = torch.cat((prev_pred_y_mult_traj, pred_y_mult_traj), 1)
 			if n_events == 1:
@@ -609,7 +586,7 @@ def compute_loss_all_batches(model,
 			for key, data in info.items():
 				if key == 'first_point':
 					info[key] = (torch.cat((prev_info[key][0], data[0]), 1), torch.cat((prev_info[key][1], data[1]), 1), torch.cat((prev_info[key][2], data[2]), 1))
-				elif key == 'latent_hazard':
+				elif key == 'latent_hazard' or key == 'first_point_ext':
 					pass
 				else:
 					info[key] = torch.cat((prev_info[key], data), 1)
@@ -625,18 +602,15 @@ def compute_loss_all_batches(model,
 			prev_hazards_y_mult_traj = hazards_y_mult_traj.detach()
 
 	reconstr_info = (pred_y_mult_traj, hazards_y_mult_traj, info)
-	batch_dict = remove_timepoints_wo_obs(batch_dict)
 	results = model.compute_all_losses(batch_dict, n_latent_traj = n_latent_traj, kl_coef = kl_coef, surv_est = surv_est, survival_loss_scale = survival_loss_scale, reconstr_info = reconstr_info)
-	
+	reconstr_loss = float(results["likelihood"].cpu().numpy()); survival_loss = float(results["survival_loss"].cpu().numpy())
 	print('\n')
 	print('============ Validation set performance ============')
-	print('survival log-likelihood : ', results["survival_loss"])
-	print('reconstr. likelihood : ', results["likelihood"])
+	print('survival log-likelihood : ', np.round(survival_loss,4))
+	print('reconstr. likelihood : ', np.round(reconstr_loss, 4))
 	remaining_time_to_event, _, perf_dic, quantile_perf_dic = get_performance_results(model, results, batch_dict_train, batch_dict, curr_epoch = curr_epoch, dataset = dataset, surv_est = surv_est, bootstrap = bootstrap, filename_suffix = filename_suffix, event_time_horizon = (min_event_time, max_event_time, tp_res), plot_survival_curves = plot_survival_curves, validation = validation, feat_names = feat_names, n_events = n_events)
 	print('====================================================')
 	print('\n')
-
-	reconstr_loss = float(results["likelihood"].cpu().numpy()); survival_loss = float(results["survival_loss"].cpu().numpy())
 	
 	if plot_concord_ibs_across_epoch:
 		# load previous records 
@@ -662,7 +636,7 @@ def compute_loss_all_batches(model,
 				model_performance[0].append(c_idx) # concodrance
 				model_performance[3].append(reconstr_loss)
 				model_performance[4].append(survival_loss)
-				if bootstrap: # once bootstrap set to true, ibs and auc are dic
+				if bootstrap: 
 					model_performance[1].append(ibs) # ibs
 					model_performance[2].append(auc) # mean auc
 				else:
@@ -671,7 +645,7 @@ def compute_loss_all_batches(model,
 			# locally store current performance
 			with open('model_performance/' + filename_suffix + '/' + 'model_performance_' + str(event_idx) + '_' + filename_suffix + '.npy', 'wb') as f:
 				np.save(f, model_performance)
-			plot_performance(model_performance, surv_est = surv_est, bootstrap = bootstrap, filename_suffix = filename_suffix, event_idx = event_idx)
+			# plot_performance(model_performance, surv_est = surv_est, bootstrap = bootstrap, filename_suffix = filename_suffix, event_idx = event_idx)
 
 			model_performance_total.append(model_performance)
 
@@ -705,7 +679,7 @@ def compute_loss_all_batches(model,
 			path = 'model_performance/' + filename_suffix + '/best_model.pt'
 			events_info_train_tuple = (batch_dict_train['event_times'], batch_dict_train['labels'], batch_dict_train['remaining_time_to_event'], batch_dict_train['end_of_obs_idx'])
 			torch.save({'params_dic': params_dic, 'max_obs_time' : batch_dict_train['max_obs_time'], 'min_max_data_tuple':min_max_data_tuple, 'events_info_train_tuple' : events_info_train_tuple, 'state_dict': model.state_dict(), 'best_epoch' : curr_epoch}, path)
- 
+
 	return model_performance_oi
 
 def check_mask(data, mask):
@@ -756,7 +730,7 @@ def perform_bootstrap_quantile(test_stat, quant_to_event_oi_train_test_surv_dict
 				# breakpoint()
 	for metric, sub_dict in sampled_stats_dic.items():
 		for quant, metric_vals in sub_dict.items():
-			sampled_ses_dic[metric][quant] = math.sqrt(1/boot_iter * sum((np.asarray(metric_vals) - np.mean(metric_vals))**2))
+			sampled_ses_dic[metric][quant] = np.round(math.sqrt(1/boot_iter * sum((np.asarray(metric_vals) - np.mean(metric_vals))**2)), 4)
 	return sampled_ses_dic
 
 def perform_bootstrap_v2(test_stat, event_oi_train, event_oi, surv_metric_oi, surv_metric_oi_mean, test_quantile_times, boot_iter = 5000, alpha = 0.05):
@@ -1811,20 +1785,20 @@ def train_surv_model(model, data_obj, params_dic, device = None, surv_est = None
 	else:
 		print('using currently existing directory : ', path)
 
-	parent_dir = "surv_curves/"
-	path = os.path.join(parent_dir, run_id)
-	if not os.path.exists(path):
-		os.mkdir(path)
-		print("Directory '% s' created" % run_id)
-	else:
-		print('using currently existing directory : ', path)
+	# parent_dir = "surv_curves/"
+	# path = os.path.join(parent_dir, run_id)
+	# if not os.path.exists(path):
+	# 	os.mkdir(path)
+	# 	print("Directory '% s' created" % run_id)
+	# else:
+	# 	print('using currently existing directory : ', path)
 
-	parent_dir = path + '/reconstruction'
-	if not os.path.exists(parent_dir):
-		os.mkdir(parent_dir)
-		print("Directory '% s' created" % parent_dir)
-	else:
-		print('using currently existing directory : ', parent_dir)
+	# parent_dir = path + '/reconstruction'
+	# if not os.path.exists(parent_dir):
+	# 	os.mkdir(parent_dir)
+	# 	print("Directory '% s' created" % parent_dir)
+	# else:
+	# 	print('using currently existing directory : ', parent_dir)
 
 	optimizer = optim.Adamax(model.parameters(), lr=params_dic['lr'])
 	if train_info is not None: # prev latest model has been loaded
@@ -1835,7 +1809,7 @@ def train_surv_model(model, data_obj, params_dic, device = None, surv_est = None
 	min_max_data_tuple = model.get_min_max_data()
 	num_batches = data_obj["n_train_batches"]
 	wait_until_kl_inc = 10;
-	for itr in tqdm(range(1, num_batches * (params_dic['niters'] + 1)), desc = 'Training across ' + str(params_dic['niters']) + ' epochs'):
+	for itr in tqdm(range(1, num_batches * params_dic['niters'] + 1), desc = 'Training across ' + str(params_dic['niters']) + ' epochs'):
 		optimizer.zero_grad()
 		update_learning_rate(optimizer, decay_rate = 0.999, lowest = params_dic['lr'] / 10)
 
@@ -1870,10 +1844,8 @@ def train_surv_model(model, data_obj, params_dic, device = None, surv_est = None
 				print('Epoch : ', itr//num_batches)
 			with torch.no_grad():
 				# if survival_mode_num != 3:
-				model_performance = compute_loss_all_batches(model, 
-					None, data_obj["train_dataloader_full_batch"] if "train_dataloader_full_batch" in data_obj.keys() else None, 
+				model_performance = compute_loss_all_batches(model, data_obj["train_dataloader_full_batch"] if "train_dataloader_full_batch" in data_obj.keys() else None, 
 					data_obj["valid_dataloader"] if "valid_dataloader" in data_obj.keys() else None, params_dic,
-					n_batches = data_obj["n_valid_batches"],
 					n_batches_train = num_batches,
 					device = device,
 					kl_coef = kl_coef, itr = itr if train_info is None else train_info['itr'] + itr, filename_suffix = run_id, 
@@ -2025,7 +1997,7 @@ def eval_model(model_info, batch_dict, surv_prob, df_perf_result = None, cs_cif_
 		data_test_tuple = (batch_dict['labels'], batch_dict['remaining_time_to_event'], batch_dict['end_of_obs_idx'])
 
 		idx_res = 0
-		df_test_result_comp = pd.DataFrame([], index = [idx_res], columns = ['ibs', 'mean_auc', 'bs 25 percentile', 'bs 25 percentile se', 'bs 50 percentile', 'bs 50 percentile se', 'bs 75 percentile', 'bs 75 percentile se', 'auc 25 percentile', 'auc 25 percentile se', 'auc 50 percentile', 'auc 50 percentile se', 'auc 75 percentile', 'auc 75 percentile se'])
+		df_test_result_comp = pd.DataFrame([], index = [idx_res], columns = ['param_set', 'best_epoch', 'ibs', 'mean_auc', 'bs 25 percentile', 'bs 25 percentile se', 'bs 50 percentile', 'bs 50 percentile se', 'bs 75 percentile', 'bs 75 percentile se', 'auc 25 percentile', 'auc 25 percentile se', 'auc 50 percentile', 'auc 50 percentile se', 'auc 75 percentile', 'auc 75 percentile se'])
 		df_test_result_comp.index.name = 'result'
 		
 		perf_dic = {}		
@@ -2064,7 +2036,8 @@ def eval_model(model_info, batch_dict, surv_prob, df_perf_result = None, cs_cif_
 				pass
 			df_perf_result.to_csv(filename_hyp_tuning)
 		# get quantile info
-		df_test_result_comp.at[idx_res, 'mean_auc'] = test_stat_dic['mean_auc']; df_test_result_comp.at[idx_res, 'ibs'] = test_stat_dic['ibs']
+		df_test_result_comp.at[idx_res, 'best_epoch'] = model_info['best_epoch']
+		df_test_result_comp.at[idx_res, 'mean_auc'] = np.round(test_stat_dic['mean_auc'],4); df_test_result_comp.at[idx_res, 'ibs'] = np.round(test_stat_dic['ibs'],4)
 		df_test_result_comp.at[idx_res, 'bs 25 percentile'], df_test_result_comp.at[idx_res, 'bs 25 percentile se'] = quantile_perf_dic['point_ests']['bs'][0.25], quantile_perf_dic['bootstrap_ses']['bs'][0.25]
 		df_test_result_comp.at[idx_res, 'bs 50 percentile'], df_test_result_comp.at[idx_res, 'bs 50 percentile se'] = quantile_perf_dic['point_ests']['bs'][0.50], quantile_perf_dic['bootstrap_ses']['bs'][0.50]
 		df_test_result_comp.at[idx_res, 'bs 75 percentile'], df_test_result_comp.at[idx_res, 'bs 75 percentile se'] = quantile_perf_dic['point_ests']['bs'][0.75], quantile_perf_dic['bootstrap_ses']['bs'][0.75]
@@ -2467,7 +2440,7 @@ def get_data_obj_merged(data_train, data_valid, data_info_dic, n_samples = None,
 			collate_fn= lambda batch: utils.variable_time_collate_fn_survival(batch, device, data_type = "train",
 			data_min = data_min, data_max = data_max, dataset = dataset, max_pred_window = max_pred_window, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
 
-		valid_dataloader = DataLoader(valid_data, batch_size = batch_size*2, shuffle=False, 
+		valid_dataloader = DataLoader(valid_data, batch_size = len(valid_data), shuffle=False, 
 			collate_fn= lambda batch: utils.variable_time_collate_fn_survival(batch, device, data_type = "test",
 			data_min = data_min, data_max = data_max, dataset = dataset, max_pred_window = max_pred_window, feat_reconstr_idx = feat_reconstr_idx, feat_names = feat_names, check_extrapolation = check_extrapolation, max_obs_time = max_obs_time))
 

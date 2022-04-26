@@ -112,6 +112,10 @@ class LatentODESub(LatentODE):
 		# load training data stats
 		self.min_max_tuple = model_info['min_max_data_tuple']
 		self.max_obs_time = model_info['max_obs_time']
+
+		# min_max_tuple_to_save = (self.min_max_tuple[0].numpy(), self.min_max_tuple[1].numpy())
+		# np.save('min_max_tuple_at_eval.npy', min_max_tuple_to_save)
+		# breakpoint()
 		
 		param_dics = {}
 		param_dics['batch_size'] = batch_size
@@ -162,6 +166,13 @@ class LatentODESub(LatentODE):
 		param_dics['attn_num_heads'] = self.attn_num_heads
 
 		data_obj, self.min_max_tuple, self.max_obs_time = utils.get_data_obj_merged(data_train, data_valid, data_info_dic, device = self.device, feat_reconstr = feat_reconstr, max_pred_window = max_pred_window, n_events = self.n_events, random_seed = self.random_seed, param_dics = param_dics)
+		
+		batch_dict_valid = utils.remove_timepoints_wo_obs(utils.get_next_batch(data_obj["valid_dataloader"]))
+		# f = open('valid_dataloader_in_training.pkl', "wb") # prev : ckp_sig_feats_dic_Jan_21th_2021_binary_wo_duplicates_thresh_0_10, ckp_sig_feats_dic_Nov_13th_binary_mut_burden, ckp_sig_feats_dic_Nov_13th_binary, ckp_sig_feats_dic_Sep_25th_binary
+		# pickle.dump(batch_dict_valid,f)
+		# f.close()
+		# min_max_tuple_to_save = (self.min_max_tuple[0].numpy(), self.min_max_tuple[1].numpy())
+		# np.save('min_max_tuple_at_train.npy', min_max_tuple_to_save)
 		# breakpoint()
 		param_dics['input_dim'] = data_obj["input_dim"]
 		utils.train_surv_model(self, data_obj, param_dics, 
@@ -193,7 +204,7 @@ class LatentODESub(LatentODE):
 			prev_pred_y = pred_y_.detach()
 			prev_latent_states = latent_states
 			prev_hazards_y = hazards_y.detach()	
-	
+		
 		pred_y = pred_y_[:, :, :batch_dict["max_end_of_obs_idx"] + 1, :] #, pred_y[:, :, batch_dict["max_end_of_obs_idx"]:, :]
 		pred_y = torch.index_select(pred_y, 2, batch_dict['observed_tp_unnorm_dec'].int())#[:, :, batch_dict['non_missing_tp_pred'], :] 
 		

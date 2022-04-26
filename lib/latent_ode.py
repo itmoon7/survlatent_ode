@@ -322,7 +322,6 @@ class LatentODE(nn.Module):
 			if mask is not None:
 				truth_w_mask = torch.cat((truth, mask), -1)
 			first_point_mu, first_point_std = self.encoder_z0(truth_w_mask, truth_time_steps, run_backwards = run_backwards)
-
 			means_z0 = first_point_mu#.repeat(1, 1, 1)
 			sigma_z0 = first_point_std#.repeat(1, 1, 1)
 			first_point_enc = utils.sample_standard_gaussian(first_point_mu, first_point_std, n_latent_traj = n_latent_traj, random_seed = self.random_seed)				
@@ -333,6 +332,7 @@ class LatentODE(nn.Module):
 		assert(torch.sum(first_point_std < 0) == 0.)
 
 		first_point_enc_aug = first_point_enc
+
 		means_z0_aug = means_z0
 			
 		assert(not torch.isnan(time_steps_to_predict).any())
