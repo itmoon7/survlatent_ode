@@ -277,7 +277,7 @@ class LatentODE(nn.Module):
 
 		# Compute likelihood of all the points
 		rec_likelihood = utils.get_gaussian_likelihood(batch_dict["data_to_predict"], pred_y, mask = batch_dict["mask_predicted_data"], obsrv_std = self.obsrv_std) 
-		surv_likelihood = utils.get_survival_likelihood(hazards_y, batch_dict, surv_est = surv_est, n_events = self.n_events)
+		surv_likelihood = utils.get_survival_likelihood(hazards_y, batch_dict, surv_est = surv_est, n_events = self.n_events, event_to_event_weight_dict = self.event_to_event_weight_dict)
 
 		loss = - torch.logsumexp(rec_likelihood -  kl_coef * kldiv_z0,0)
 		if torch.isnan(loss):
@@ -286,7 +286,7 @@ class LatentODE(nn.Module):
 		loss = loss + surv_likelihood * survival_loss_scale 
 		results = {}
 		results["loss"] = torch.mean(loss)
-		results["survival_loss"] = -1*torch.mean(surv_likelihood).detach()
+		results["survival_loss"] = -1*torch.mean(surv_likelihood).detach() if type(surv_likelihood) == torch.Tensor else 0
 		results["likelihood"] = -1*torch.mean(rec_likelihood).detach()
 		if surv_est == 'Softmax' or surv_est == 'Hazard': # latent ode nonparam
 			if n_latent_traj > 1:

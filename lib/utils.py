@@ -385,7 +385,7 @@ def normalize_masked_data(data, mask, att_min, att_max, extra = False, scale_par
 			raise Exception("Zero!")
 
 		if torch.isnan(data_norm).any():
-			raise Exception("nans!")
+			raise Exception("nans in the normalized data; check your min and max data vectors")
 
 		# set masked out elements back to zero 
 		data_norm[mask == 0] = 0
@@ -547,7 +547,7 @@ def subsample_observed_data(data_dict, n_tp_to_sample = None, n_points_to_cut = 
 
 def compute_loss_all_batches(model, train_dataloader, valid_dataloader, params_dic, n_batches_train, device,
 	n_latent_traj = 1, kl_coef = 1., 
-	max_samples_for_eval = None, plot_survival_curves = False, itr = None, 
+	max_samples_for_eval = None, plot_survival_curves = True, itr = None, 
 	plot_concord_ibs_across_epoch = True, filename_suffix = None,
 	surv_est = None, dataset = None, bootstrap = False, feat_names = None, max_pred_window = None, min_max_data_tuple = None, survival_loss_scale = 10, optimizer = None, n_events = 1, valid_batch_size = 200):
 
@@ -617,7 +617,7 @@ def compute_loss_all_batches(model, train_dataloader, valid_dataloader, params_d
 		model_performance_total = []
 		for event_idx in range(n_events):
 			if n_events > 1:
-				c_idx, ibs, auc, mean_auc = perf_dic[event_idx]['mean_c_idx'], perf_dic[event_idx]['mean_bs_ef'], perf_dic[event_idx]['auc'], perf_dic[event_idx]['mean_auc'] #quantile_perf_dic['point_ests']['mean_auc']
+				c_idx, ibs, auc, mean_auc = perf_dic[event_idx]['mean_c_idx'], perf_dic[event_idx]['ibs'], perf_dic[event_idx]['auc'], perf_dic[event_idx]['mean_auc'] #quantile_perf_dic['point_ests']['mean_auc']
 			else:
 				c_idx, ibs, auc, mean_auc = perf_dic['c_idx'], perf_dic['ibs'], perf_dic['auc'], perf_dic['mean_auc'] #quantile_perf_dic['point_ests']['mean_auc']
 
@@ -1284,13 +1284,18 @@ def get_performance_at_quantiles(surv_metric, data_train_tuple, data_test_tuple,
 				if idx in eligible_indices:
 					surv_metric_total.append(surv_ind_[test_quantile_times[0]:test_quantile_times[-1]])
 			# 25 - 76 percentiles
-			auc, mean_auc = cumulative_dynamic_auc(event_oi_train, event_oi, 1-np.asarray(surv_metric_total), times_oi)
-			ibs = integrated_brier_score(event_oi_train, event_oi, np.asarray(surv_metric_total), times_oi)
-	if not ef_surv:
-		test_stat_dic['mean_auc'] = mean_auc
-		test_stat_dic['ibs'] = ibs
-	else:
-		test_stat_dic['mean_bs_ef'] = np.mean([bs for bs in test_stat_dic['bs'].values()])
+			if n_events == 1:
+				auc, mean_auc = cumulative_dynamic_auc(event_oi_train, event_oi, 1-np.asarray(surv_metric_total), times_oi)
+				ibs = integrated_brier_score(event_oi_train, event_oi, np.asarray(surv_metric_total), times_oi)
+			else:
+				auc, mean_auc = cumulative_dynamic_auc(event_oi_train, event_oi, np.asarray(surv_metric_total), times_oi)
+				ibs = integrated_brier_score(event_oi_train, event_oi, 1 - np.asarray(surv_metric_total), times_oi)
+				# breakpoint()
+	# if not ef_surv:
+	test_stat_dic['mean_auc'] = mean_auc
+	test_stat_dic['ibs'] = ibs
+	# else:
+	# 	test_stat_dic['mean_bs_ef'] = np.mean([bs for bs in test_stat_dic['bs'].values()])
 	
 	display_performance_at_quantiles(test_stat_dic, ef_surv = ef_surv, n_events = n_events)
 	if bootstrap:
@@ -1336,7 +1341,7 @@ def get_performance_results(model, results, batch_dict_train, batch_dict, event_
 
 			perf_dic_list = []; quantile_perf_dic_list = []
 			for idx_, cs_cif_ in enumerate(cs_cif_total):
-				print('--------------------------')
+				print('----------------------------------------------------')
 				print('outcome : ', idx_ + 1)
 				# for model evaluation
 				data_train_tuple = (batch_dict_train['labels'] == idx_ + 1, batch_dict_train['remaining_time_to_event'], batch_dict_train['end_of_obs_idx'])
@@ -1356,45 +1361,49 @@ def get_performance_results(model, results, batch_dict_train, batch_dict, event_
 				quantile_perf_dic_list.append(quantile_perf_dic)
 
 				perf_dic = {}
-				if compute_cont_metric:
-					auc, mean_auc = compute_auc(cs_cif_, data_train_tuple, data_test_tuple, [], [], event_time_horizon = (min_event_time, max_event_time, tp_res), filename_suffix = filename_suffix, curr_epoch = curr_epoch, plot = plot, bootstrap = bootstrap)		
-					perf_dic['auc'] = auc
-					perf_dic['mean_auc'] = mean_auc
-					print('mean AUC from last obs to 90 % quantile (' + str(np.round(np.quantile(remaining_time_to_event, q = 0.9))) + ') : ', np.round(mean_auc['mean_auc'] if bootstrap else mean_auc, 3))
-				else:
-					perf_dic['auc'] = 0.0 # zeros are put as dummies
-					perf_dic['mean_auc'] = test_stat_dic['mean_auc']
-					perf_dic['mean_c_idx'] = test_stat_dic['mean_c_idx']
-				perf_dic['c_idx'] = 0.0 
-				perf_dic['ibs'] = 0.0
+				# if compute_cont_metric:
+				# 	auc, mean_auc = compute_auc(cs_cif_, data_train_tuple, data_test_tuple, [], [], event_time_horizon = (min_event_time, max_event_time, tp_res), filename_suffix = filename_suffix, curr_epoch = curr_epoch, plot = plot, bootstrap = bootstrap)		
+				perf_dic['mean_c_idx'] = 0.0
+				perf_dic['mean_auc'] = test_stat_dic['mean_auc']
+				# 	print('mean AUC from last obs to 90 % quantile (' + str(np.round(np.quantile(remaining_time_to_event, q = 0.9))) + ') : ', np.round(mean_auc['mean_auc'] if bootstrap else mean_auc, 3))
+				# else:
+				perf_dic['auc'] = 0.0 # zeros are put as dummies
+				# 	perf_dic['mean_auc'] = test_stat_dic['mean_auc']
+				# 	perf_dic['mean_c_idx'] = test_stat_dic['mean_c_idx']
+				# perf_dic['c_idx'] = 0.0 
+				perf_dic['ibs'] = test_stat_dic['ibs']
+				# breakpoint()
 				perf_dic_list.append(perf_dic)
-				print('--------------------------')
+				# print('--------------------------------------------------------')
 				# evaluate event free survival :only do this in the first iteration
 				# if idx == 0:
-			data_train_tuple = (batch_dict_train['labels'] != 0, batch_dict_train['remaining_time_to_event'], batch_dict_train['end_of_obs_idx'])
-			data_test_tuple = (batch_dict['labels'] != 0, batch_dict['remaining_time_to_event'], last_observed_points)
+			# apply event rates
+
+			# event free survival metric
+			# data_train_tuple = (batch_dict_train['labels'] != 0, batch_dict_train['remaining_time_to_event'], batch_dict_train['end_of_obs_idx'])
+			# data_test_tuple = (batch_dict['labels'] != 0, batch_dict['remaining_time_to_event'], last_observed_points)
 			# get ibs
-			perf_dic = {}
-			if compute_cont_metric:
-				ibs, ibs_censored, ibs_uncensored = compute_integrated_brier_score(ef_surv_prob, data_train_tuple, data_test_tuple, event_time_horizon = (min_event_time, max_event_time, tp_res), bootstrap = bootstrap, filename_suffix = filename_suffix, curr_epoch = curr_epoch, plot = plot)
-				perf_dic['ibs_ef'] = ibs
-				print('\n')
-				print('event free survival : integarted brier score from last obs to 90 % quantile (' + str(np.round(np.quantile(remaining_time_to_event, q = 0.9))) + ') : ', np.round(ibs['ibs'] if bootstrap else ibs, 3))
-			else:
-				perf_dic['ibs_ef'] = 0.0
-			perf_dic_list.append(perf_dic)
-			with warnings.catch_warnings(): # ignore warnings in a partial section of the code
-				warnings.simplefilter("ignore")
-				if validation == True:
-					ef_test_stat_dic, ef_sampled_ses_dic, ef_conf_ints_dic = get_performance_at_quantiles(ef_surv_prob, data_train_tuple, data_test_tuple, bootstrap = False, event_time_horizon = (min_event_time, max_event_time, tp_res), dataset = dataset, n_events = n_events, ef_surv = True)
-				else: # test set; do bootstrap
-					ef_test_stat_dic, ef_sampled_ses_dic, ef_conf_ints_dic = get_performance_at_quantiles(ef_surv_prob, data_train_tuple, data_test_tuple, bootstrap = True, event_time_horizon = (min_event_time, max_event_time, tp_res), dataset = dataset, n_events = n_events, ef_surv = True)
-			quantile_perf_dic['point_ests_ef'] = ef_test_stat_dic
-			quantile_perf_dic['bootstrap_ses_ef'] = ef_sampled_ses_dic
-			quantile_perf_dic['bootstrap_cis_ef'] = ef_conf_ints_dic
-			for idx_list in range(len(perf_dic_list)):
-				perf_dic_list[idx_list]['mean_bs_ef'] = ef_test_stat_dic['mean_bs_ef']
-			quantile_perf_dic_list.append(quantile_perf_dic)
+			# perf_dic = {}
+			# if compute_cont_metric:
+			# 	ibs, ibs_censored, ibs_uncensored = compute_integrated_brier_score(ef_surv_prob, data_train_tuple, data_test_tuple, event_time_horizon = (min_event_time, max_event_time, tp_res), bootstrap = bootstrap, filename_suffix = filename_suffix, curr_epoch = curr_epoch, plot = plot)
+			# 	perf_dic['ibs_ef'] = ibs
+			# 	print('\n')
+			# 	print('event free survival : integarted brier score from last obs to 90 % quantile (' + str(np.round(np.quantile(remaining_time_to_event, q = 0.9))) + ') : ', np.round(ibs['ibs'] if bootstrap else ibs, 3))
+			# else:
+			# 	perf_dic['ibs_ef'] = 0.0
+			# perf_dic_list.append(perf_dic)
+			# with warnings.catch_warnings(): # ignore warnings in a partial section of the code
+			# 	warnings.simplefilter("ignore")
+			# 	if validation == True:
+			# 		ef_test_stat_dic, ef_sampled_ses_dic, ef_conf_ints_dic = get_performance_at_quantiles(ef_surv_prob, data_train_tuple, data_test_tuple, bootstrap = False, event_time_horizon = (min_event_time, max_event_time, tp_res), dataset = dataset, n_events = n_events, ef_surv = True)
+			# 	else: # test set; do bootstrap
+			# 		ef_test_stat_dic, ef_sampled_ses_dic, ef_conf_ints_dic = get_performance_at_quantiles(ef_surv_prob, data_train_tuple, data_test_tuple, bootstrap = True, event_time_horizon = (min_event_time, max_event_time, tp_res), dataset = dataset, n_events = n_events, ef_surv = True)
+			# quantile_perf_dic['point_ests_ef'] = ef_test_stat_dic
+			# quantile_perf_dic['bootstrap_ses_ef'] = ef_sampled_ses_dic
+			# quantile_perf_dic['bootstrap_cis_ef'] = ef_conf_ints_dic
+			# for idx_list in range(len(perf_dic_list)):
+			# 	perf_dic_list[idx_list]['mean_bs_ef'] = ef_test_stat_dic['mean_bs_ef']
+			# quantile_perf_dic_list.append(quantile_perf_dic)
 	else:
 		raise NotImplementedError
 
@@ -1785,13 +1794,13 @@ def train_surv_model(model, data_obj, params_dic, device = None, surv_est = None
 	else:
 		print('using currently existing directory : ', path)
 
-	# parent_dir = "surv_curves/"
-	# path = os.path.join(parent_dir, run_id)
-	# if not os.path.exists(path):
-	# 	os.mkdir(path)
-	# 	print("Directory '% s' created" % run_id)
-	# else:
-	# 	print('using currently existing directory : ', path)
+	parent_dir = "surv_curves/"
+	path = os.path.join(parent_dir, run_id)
+	if not os.path.exists(path):
+		os.mkdir(path)
+		print("Directory '% s' created" % run_id)
+	else:
+		print('using currently existing directory : ', path)
 
 	# parent_dir = path + '/reconstruction'
 	# if not os.path.exists(parent_dir):
@@ -1883,7 +1892,7 @@ def get_gaussian_likelihood(truth, pred_y, mask = None, obsrv_std = None):
 	log_density = torch.mean(log_density_data, 1)
 	return log_density
 
-def get_survival_likelihood(hazards_y, batch_dict, include_aug_loss = False, eps = 1e-5, surv_est = None, n_events = 1, event_ratio = 2):
+def get_survival_likelihood(hazards_y, batch_dict, include_aug_loss = False, eps = 1e-5, surv_est = None, n_events = 1, event_to_event_weight_dict = None):
 	"""
 	hazards_y (shape) = [num_traj, samples in batch, time points, 1]
 	"""
@@ -1917,7 +1926,8 @@ def get_survival_likelihood(hazards_y, batch_dict, include_aug_loss = False, eps
 						raise KeyError('Detect NaN survival loss')
 				else: 
 					# get corresponding hazard based on the label
-					hazards_ps = hazards_y[0, :, :, int(label.cpu().numpy()[0] - 1)][idx]
+					label_np = label.cpu().numpy()[0]
+					hazards_ps = hazards_y[0, :, :, int(label_np - 1)][idx]
 					hazards_ps_sel = torch.masked_select(hazards_ps.view(-1), pred_sel.bool())
 
 					if len(hazards_ps_sel) == 1:
@@ -1929,17 +1939,20 @@ def get_survival_likelihood(hazards_y, batch_dict, include_aug_loss = False, eps
 					hazard_ps_sel_not_bf_event = hazards_ps_sel_not[:-1]
 
 					ll_ind = (hazard_ps_sel_not_bf_event + eps).log().sum().add(hazard_at_event.add(eps).log())# individual likelihood
-					uncensored_ll.append(event_ratio*ll_ind if label == 1 else ll_ind) 
-					int_loss = (hazard_ps_sel_not_bf_event + eps).log().sum().add(hazard_at_event.add(eps).log())
+					uncensored_ll.append(event_to_event_weight_dict[label_np]*ll_ind) 
+					int_loss = (hazard_ps_sel_not_bf_event +  eps).log().sum().add(hazard_at_event.add(eps).log())
 					if np.isinf(int_loss.cpu().detach().numpy()):
 						raise KeyError('Detect NaN survival loss')
 
-			censored_ll = torch.stack(censored_ll, 0).to(get_device(hazards_y[0]))
-			uncensored_ll = torch.stack(uncensored_ll, 0).to(get_device(hazards_y[0]))
-			loss = (censored_ll.sum() + uncensored_ll.sum()).mul(-1)
-			if np.isinf(loss.cpu().detach().numpy()):
-				raise KeyError('Detect NaN survival loss')
-			return (censored_ll.sum() + uncensored_ll.sum()).mul(-1)
+			if len(censored_ll) > 0 and len(uncensored_ll) > 0:
+				censored_ll = torch.stack(censored_ll, 0).to(get_device(hazards_y[0]))
+				uncensored_ll = torch.stack(uncensored_ll, 0).to(get_device(hazards_y[0]))
+				loss = (censored_ll.sum() + uncensored_ll.sum()).mul(-1)
+				if np.isinf(loss.cpu().detach().numpy()):
+					raise KeyError('Detect NaN survival loss')
+				return (censored_ll.sum() + uncensored_ll.sum()).mul(-1)
+			else:
+				return 0
 	else:
 		raise NotImplementedError
 
@@ -2047,11 +2060,17 @@ def eval_model(model_info, batch_dict, surv_prob, df_perf_result = None, cs_cif_
 		df_test_result_comp.at[idx_res, 'auc 75 percentile'], df_test_result_comp.at[idx_res, 'auc 75 percentile se'] = quantile_perf_dic['point_ests']['auc'][0.75], quantile_perf_dic['bootstrap_ses']['auc'][0.75]
 	else:
 		# competing events :
-		horizons = [0.25, 0.375, 0.5, 0.625, 0.75]
-		metrics = ['num_samples', 'bs', 'bs_se', 'bs_95', 'auc', 'auc_se', 'auc_95', 'c_idx', 'c_idx_se', 'c_idx_95']
-		multi_cols = pd.MultiIndex.from_product([horizons, metrics], names=['horizons', 'metrics'])
-		df_test_result_comp = pd.DataFrame([], index = np.arange(n_events), columns = multi_cols)
-		df_test_result_comp.index.name = 'events'
+		horizons = [0.25, 0.5, 0.75]
+		events = ['event_' + str(idx + 1) for idx in np.arange(n_events)]
+		metrics = ['ibs', 'mean_auc', 'bs 25 percentile', 'bs 25 percentile se', 'bs 50 percentile', 'bs 50 percentile se', 'bs 75 percentile', 'bs 75 percentile se', 'auc 25 percentile', 'auc 25 percentile se', 'auc 50 percentile', 'auc 50 percentile se', 'auc 75 percentile', 'auc 75 percentile se']
+		cols = ['_'.join(element) for element in itertools.product(metrics, events)]
+		# multi_cols = pd.MultiIndex.from_product([events, metrics], names=['events', 'metrics'])
+		df_test_result_comp = pd.DataFrame([], index = [0], columns = ['param_set', 'best_epoch'] + cols)
+		df_test_result_comp.index.name = 'result'
+
+		df_test_result_comp.at[0, 'param_set'] 
+		df_test_result_comp.at[0, 'best_epoch'] = model_info['best_epoch']
+		# breakpoint()
 		ef_surv_prob = surv_prob
 
 		# store cs_cif_total and ef_surv_prob
@@ -2061,54 +2080,32 @@ def eval_model(model_info, batch_dict, surv_prob, df_perf_result = None, cs_cif_
 			np.save(f, ef_surv_prob)
 		# breakpoint()
 		for idx_, cs_cif_ in enumerate(cs_cif_total):
-			print('--------------------------')
+			print('---------------------------------------------------')
 			print('outcome : ', idx_ + 1)
 			# for model evaluation
 			data_train_tuple = (model_info['events_info_train_tuple'][1] == idx_ + 1, model_info['events_info_train_tuple'][2], model_info['events_info_train_tuple'][3])
 			data_test_tuple = (batch_dict['labels'] == idx_ + 1, batch_dict['remaining_time_to_event'], batch_dict['end_of_obs_idx'])
 			# get performances at quantiles :
-			test_stat_dic, sampled_ses_dic, conf_ints_dic = get_performance_at_quantiles(cs_cif_, data_train_tuple, data_test_tuple, event_idx = idx_, run_id = run_id, sample_ids = np.asarray(batch_dict['sample_ids']), bootstrap = True, event_time_horizon = (min_event_time, max_pred_window, tp_res), dataset = dataset, n_events = n_events, horizons = horizons)
-
-			for metrics, sub_dict in test_stat_dic.items():
+			test_stat_dic, sampled_ses_dic = get_performance_at_quantiles(cs_cif_, data_train_tuple, data_test_tuple, event_idx = idx_, run_id = run_id, sample_ids = np.asarray(batch_dict['sample_ids']), bootstrap = True, event_time_horizon = (min_event_time, max_pred_window, tp_res), dataset = dataset, n_events = n_events, horizons = horizons)
+			# breakpoint()
+			for metric, sub_dict in test_stat_dic.items():
 				for quant in horizons:
-					if metrics in ['num_samples', 'auc', 'c_idx']:
-						df_test_result_comp.at[idx_, (quant, metrics)] = sub_dict[quant]
-						if metrics != 'num_samples':
-							df_test_result_comp.at[idx_, (quant, metrics + '_se')] = sampled_ses_dic[metrics][quant]
-							df_test_result_comp.at[idx_, (quant, metrics + '_95')] = conf_ints_dic[metrics][quant]
-			print('--------------------------')
-
+					quant_str = str(int(quant*100))
+					if metric == 'auc' or metric == 'bs':
+						# df_test_result_comp.at[idx_, (quant, metrics)] = sub_dict[quant]
+						# if metrics != 'num_samples':
+						if metric == 'bs':
+							df_test_result_comp.at[0, 'bs ' + quant_str + ' percentile_event_' + str(idx_+1)] = sub_dict[quant]
+							df_test_result_comp.at[0, 'bs ' + quant_str + ' percentile se_event_' + str(idx_+1)] = sampled_ses_dic[metric][quant]
+						elif metric == 'auc':
+							df_test_result_comp.at[0, 'auc ' + quant_str + ' percentile_event_' + str(idx_+1)] = sub_dict[quant]
+							df_test_result_comp.at[0, 'auc ' + quant_str + ' percentile se_event_' + str(idx_+1)] = sampled_ses_dic[metric][quant]
+						# df_test_result_comp.at[idx_, (quant, metrics + '_95')] = conf_ints_dic[metrics][quant]
 			"""
 			Store the score : 
 			"""
-
-			df_perf_result.at[idx, 'mean_auc_' + str(idx_)] = test_stat_dic['mean_auc']
-			df_perf_result.at[idx, 'mean_c_idx_' + str(idx_)] = test_stat_dic['mean_c_idx']
-			
-		# get event free surv prob
-		data_train_tuple = (model_info['events_info_train_tuple'][1] != 0, model_info['events_info_train_tuple'][2], model_info['events_info_train_tuple'][3])
-		data_test_tuple = (batch_dict['labels'] != 0, batch_dict['remaining_time_to_event'], batch_dict['end_of_obs_idx'])
-		
-		ef_test_stat_dic, ef_sampled_ses_dic, ef_conf_ints_dic = get_performance_at_quantiles(ef_surv_prob, data_train_tuple, data_test_tuple, bootstrap = True, event_time_horizon = (min_event_time, max_pred_window, tp_res), dataset = dataset, n_events = n_events, ef_surv = True, horizons = horizons)
-		for metrics, sub_dict in ef_test_stat_dic.items():
-			for quant in horizons:
-				if metrics in ['bs']:
-					df_test_result_comp.at[idx_, (quant, metrics)] = sub_dict[quant]
-					df_test_result_comp.at[idx_, (quant, metrics + '_se')] = ef_sampled_ses_dic[metrics][quant]
-					df_test_result_comp.at[idx_, (quant, metrics + '_95')] = ef_conf_ints_dic[metrics][quant]
-		# fill out hyper-param tuning df :
-		df_perf_result.at[idx, 'run_id'] = run_id
-		df_perf_result.at[idx, 'best_epoch'] = model_info['best_epoch']
-		df_perf_result.at[idx, 'mean_bs_ef'] = ef_test_stat_dic['mean_bs_ef']
-
-		# get max cs_cif_dvt and death
-		cs_cif_max_dvt, cs_cif_max_death = get_max_cs_cif(cs_cif_total)
-
-		df_perf_result.at[idx, 'reconstr_loss'] = rec_loss.cpu().detach().numpy()[0]
-		df_perf_result.at[idx, 'cs_cif_max_dvt'] = cs_cif_max_dvt
-		df_perf_result.at[idx, 'cs_cif_max_death'] = cs_cif_max_death
-		if not evaluate_only:
-			df_perf_result.to_csv(filename_hyp_tuning)
+			df_test_result_comp.at[0, 'mean_auc_event_' + str(idx_+1)] = np.round(test_stat_dic['mean_auc'],4)
+			df_test_result_comp.at[0, 'ibs_event_' + str(idx_+1)] = np.round(test_stat_dic['ibs'],4)
 	# breakpoint()
 	return df_test_result_comp
 			
@@ -2229,29 +2226,24 @@ def _performance_at_quantiles(test_stat_dic, event_oi_train, event_oi, surv_metr
 	event_oi_uncensored['event'] = np.ones(len(uncensored_time_list))
 	event_oi_uncensored['time'] = uncensored_time_list
 
-	if n_events == 1 or ef_surv:
+	if n_events == 1:
 		bs = brier_score(event_oi_train, event_oi, surv_metric_oi, quant_time)[1][0]
-	if not ef_surv:
-		if n_events == 1:
-			# when dealing with a single event, flip the surv prob to get CIF
-			# In a single event, we get all the evaluation metrics of interest
-			surv_metric_oi = np.asarray([1 - surv_ind for surv_ind in surv_metric_oi])
-			surv_metric_oi_cum = [1 - surv_ind_cum for surv_ind_cum in surv_metric_oi_cum]
-			auc, mean_auc = cumulative_dynamic_auc(event_oi_train, event_oi, surv_metric_oi, quant_time)
-		else:
-			# In multiple events, we get {c, auc, mean_auc} and {bs}, separately 
-			auc, mean_auc = cumulative_dynamic_auc(event_oi_train, event_oi, surv_metric_oi, quant_time)
+		# when dealing with a single event, flip the surv prob to get CIF
+		# In a single event, we get all the evaluation metrics of interest
+		surv_metric_oi = np.asarray([1 - surv_ind for surv_ind in surv_metric_oi])
+		surv_metric_oi_cum = [1 - surv_ind_cum for surv_ind_cum in surv_metric_oi_cum]
+		auc, mean_auc = cumulative_dynamic_auc(event_oi_train, event_oi, surv_metric_oi, quant_time)
+	else:
+		# note for multiple events, CIF is passed down
+		bs = brier_score(event_oi_train, event_oi, 1-surv_metric_oi, quant_time)[1][0]
+		# In multiple events, we get {c, auc, mean_auc} and {bs}, separately 
+		auc, mean_auc = cumulative_dynamic_auc(event_oi_train, event_oi, surv_metric_oi, quant_time)
 
 	# this dictionary is used for bootstrap
 	quant_to_event_oi_train_test_surv_dict[quant] = (event_oi_train, event_oi, surv_metric_oi, quant_time, surv_metric_oi_cum if not ef_surv else None, last_observed_points_oi)
 	# populate the dict with results
-	if n_events == 1:
-		test_stat_dic['bs'][quant] = bs
-		test_stat_dic['auc'][quant] = auc[0]
-	elif not ef_surv:
-		test_stat_dic['auc'][quant] = auc[0]
-	elif ef_surv:
-		test_stat_dic['bs'][quant] = bs
+	test_stat_dic['bs'][quant] = bs
+	test_stat_dic['auc'][quant] = auc[0]
 
 	return test_stat_dic, quant_to_event_oi_train_test_surv_dict
 
@@ -2259,23 +2251,28 @@ def _performance_at_quantiles(test_stat_dic, event_oi_train, event_oi, surv_metr
 def display_performance_at_quantiles(test_stat_dic, ef_surv = False, n_events = 1):
 	print('Performance at quantiles : ')
 	# print('num_samples : ', test_stat_dic['num_samples'])
-	if ef_surv or n_events == 1:
-		for key, value in test_stat_dic['bs'].items():
-			test_stat_dic['bs'][key] = np.round(value, 4)
-		print('BS(t) at the percentiles : ', test_stat_dic['bs'])
-		# print('bs censored : ', test_stat_dic['bs_censored'])
-		# print('bs uncensored : ', test_stat_dic['bs_uncensored'])
-		if n_events == 1:
-			for key, value in test_stat_dic['auc'].items():
-				test_stat_dic['auc'][key] = np.round(value, 4)
-			print('AUC(t) at the percentiles : ', test_stat_dic['auc'])
-			print('mean AUC(t) over 25-75 percentile : ', np.round(test_stat_dic['mean_auc'], 4))
-			print('Integrated BS(t) over 25-75 percentile : ', np.round(test_stat_dic['ibs'], 4))
-	else:
-		print('auc : ', test_stat_dic['auc'])
-		print('mean auc across quants : ', test_stat_dic['mean_auc'])
-		print('c_idx : ', test_stat_dic['c_idx'])
-		print('mean c-idx across quants : ', test_stat_dic['mean_c_idx'])
+	# if n_events == 1:
+	for key, value in test_stat_dic['bs'].items():
+		test_stat_dic['bs'][key] = np.round(value, 4)
+	print('BS(t) at the percentiles : ', test_stat_dic['bs'])
+	# print('bs censored : ', test_stat_dic['bs_censored'])
+	# print('bs uncensored : ', test_stat_dic['bs_uncensored'])
+	for key, value in test_stat_dic['auc'].items():
+		test_stat_dic['auc'][key] = np.round(value, 4)
+	print('AUC(t) at the percentiles : ', test_stat_dic['auc'])
+	print('mean AUC(t) over 25-75 percentile : ', np.round(test_stat_dic['mean_auc'], 4))
+	print('Integrated BS(t) over 25-75 percentile : ', np.round(test_stat_dic['ibs'], 4))
+	# else:
+	# 	for key, value in test_stat_dic['bs'].items():
+	# 		test_stat_dic['bs'][key] = np.round(value, 4)
+	# 	print('BS(t) at the percentiles : ', test_stat_dic['bs'])
+
+
+	# 	breakpoint()
+	# 	print('auc : ', test_stat_dic['auc'])
+	# 	print('mean auc across quants : ', test_stat_dic['mean_auc'])
+	# 	# print('c_idx : ', test_stat_dic['c_idx'])
+	# 	# print('mean c-idx across quants : ', test_stat_dic['mean_c_idx'])
 	return
 
 
@@ -2321,27 +2318,46 @@ def pre_process_data(data, data_info_dic, max_pred_window = None, n_events = 1, 
 				"""
 		event = np.asarray(event)
 		durations = np.asarray(durations)
-		breakpoint()
+		# breakpoint()
 	else:
 		event = data[data_info_dic['event_col']].values
 		durations = (data[data_info_dic['time_to_event_col']] - data[data_info_dic['time_col']]).values
 
 	ids_ = data[data_info_dic['id_col']].values
 	sample_id_to_range_dic = {}; got_first_idx = False; prev_id_ = ids_[0]; start_idx = None; end_idx = None
-	for idx_, id_ in enumerate(ids_):
-		if prev_id_ != id_:
-			sample_id_to_range_dic[prev_id_] = (start_idx, idx_)
-			got_first_idx = False; start_idx = None; end_idx = None
-		if not got_first_idx:
-			start_idx = idx_
-			got_first_idx = True
-		prev_id_ = id_
-	# for the last sample
-	sample_id_to_range_dic[prev_id_] = (start_idx, idx_ + 1)
+	if n_events > 1:
+		times_ = data[data_info_dic['time_col']].values; idx_ = 0
+		for id_, time_, dur_ in zip(ids_, times_, durations):
+			if prev_id_ != id_:
+				sample_id_to_range_dic[prev_id_] = (start_idx, end_idx)
+				got_first_idx = False; start_idx = None; end_idx = None
+			if not got_first_idx:
+				start_idx = idx_
+				got_first_idx = True
+
+			if dur_ > 0 and got_first_idx: # only take into account observations before the event of interest
+				end_idx = idx_ + 1
+			prev_id_ = id_
+			idx_ += 1
+		# for the last sample
+		sample_id_to_range_dic[prev_id_] = (start_idx, end_idx)
+		# breakpoint()
+	else:
+		for idx_, id_ in enumerate(ids_):
+			if prev_id_ != id_:
+				sample_id_to_range_dic[prev_id_] = (start_idx, idx_)
+				got_first_idx = False; start_idx = None; end_idx = None
+			if not got_first_idx:
+				start_idx = idx_
+				got_first_idx = True
+			prev_id_ = id_
+		# for the last sample
+		sample_id_to_range_dic[prev_id_] = (start_idx, idx_ + 1)
 	# set missing values to 0; all zeroed values will be masked
 	x_ = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value = 0.0).fit_transform(x)
 
 	sampled_ids = sorted(set(data[data_info_dic['id_col']]))
+	skipped_samples = []; # those who experience event at time t which corresponds to the last observed time (i.e. observed remaining tte = 0))
 	if dataset == 'general':
 		x, m, t, t_end, e, dur, ms = [], [], [], [], [], [], [] # where m is a mask for observed values, ms is a mask for hazard function
 		x_ext, m_ext, t_ext, ids = [], [], [], []
@@ -2350,7 +2366,9 @@ def pre_process_data(data, data_info_dic, max_pred_window = None, n_events = 1, 
 			# if id_ in sampled_ids: # make sure id_ belongs to the sampled cohort
 			ids.append(id_)
 			start, end = sample_id_to_range_dic[id_]
-			
+			if end is None:
+				skipped_samples.append(id_)
+				continue
 			x.append(x_[start:end])
 			m.append((x_[start:end] != 0)*1)
 			t.append(time[start:end])
@@ -2378,8 +2396,9 @@ def pre_process_data(data, data_info_dic, max_pred_window = None, n_events = 1, 
 		raise NotImplementedError
 	# print('Complete!')
 	# print('\n')
+	print('excluded samples due to event times overlapping last observation times (i.e. remaining t_i = 0) : ', skipped_samples)
+	print('n = ', len(skipped_samples))
 	return ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, max(t_end)
-
 
 def get_data_obj_merged(data_train, data_valid, data_info_dic, n_samples = None, max_pred_window = None, n_events = 1, dataset = 'general', random_seed = 0, device = None, feat_reconstr = None, process_eval_set = False, check_extrapolation = False, param_dics = None, min_max_tuple = None, max_obs_time = None):
 
@@ -2395,6 +2414,7 @@ def get_data_obj_merged(data_train, data_valid, data_info_dic, n_samples = None,
 				eval_data.append((str(id_), torch.tensor(t_, dtype = torch.float), torch.tensor(x_, dtype = torch.float), torch.tensor(m_, dtype = torch.float), torch.tensor(ms_, dtype = torch.float), torch.tensor(e_, dtype = torch.float), torch.tensor(dur_, dtype = torch.float)))
 	else:
 		train_data, valid_data = [], []
+		if n_events > 1: train_events = []
 		if check_extrapolation:
 			# train
 			ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, max_obs_time = utils.pre_process_data(data_train, data_info_dic, max_pred_window = max_pred_window, n_events = n_events, random_seed = random_seed)
@@ -2409,11 +2429,26 @@ def get_data_obj_merged(data_train, data_valid, data_info_dic, n_samples = None,
 			ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, max_obs_time = utils.pre_process_data(data_train, data_info_dic, max_pred_window = max_pred_window, n_events = n_events, random_seed = random_seed)
 			for id_, x_, m_, ms_, t_, e_, dur_ in zip(ids, x, m, ms, t, e, dur):
 				train_data.append((str(id_), torch.tensor(t_, dtype = torch.float), torch.tensor(x_, dtype = torch.float), torch.tensor(m_, dtype = torch.float), torch.tensor(ms_, dtype = torch.float), torch.tensor(e_, dtype = torch.float), torch.tensor(dur_, dtype = torch.float)))
+				if n_events > 1: train_events.append(e_)
 			# valid
 			ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, _ = utils.pre_process_data(data_valid, data_info_dic, max_pred_window = max_pred_window, n_events = n_events, random_seed = random_seed)
 			for id_, x_, m_, ms_, t_, e_, dur_ in zip(ids, x, m, ms, t, e, dur):
 				valid_data.append((str(id_), torch.tensor(t_, dtype = torch.float), torch.tensor(x_, dtype = torch.float), torch.tensor(m_, dtype = torch.float), torch.tensor(ms_, dtype = torch.float), torch.tensor(e_, dtype = torch.float), torch.tensor(dur_, dtype = torch.float)))
 
+		# for comepting events get event ratios dict : weight for the event with most frequent occurrences gets one and other events are accordingly up-weighted
+		# this may be used for weighting the survival loss accordingly
+		if n_events > 1:
+			train_events = np.asarray(train_events)
+			event_to_event_weight_dict = {}
+			total_events = (train_events != 0).sum()
+			for idx_event in range(n_events):
+				event_to_event_weight_dict[idx_event + 1] = total_events - (train_events == idx_event + 1).sum()
+			min_event_weight = min(event_to_event_weight_dict.values())
+			sum_weights = sum(event_to_event_weight_dict.values())
+			for event, weight in event_to_event_weight_dict.items():
+				event_to_event_weight_dict[event] = weight/min_event_weight
+			# breakpoint()
+	
 	feat_reconstr_idx = [feat_names.index(feat) for feat in feat_reconstr] if feat_reconstr is not None else None
 	if not process_eval_set: # this needs to be removed for a practical implementation
 		# np.random.seed(random_seed)
@@ -2452,7 +2487,10 @@ def get_data_obj_merged(data_train, data_valid, data_info_dic, n_samples = None,
 						"n_train_batches": len(train_dataloader),
 						"n_valid_batches": len(valid_dataloader),
 						"attr": feat_names if feat_reconstr is None else feat_reconstr} #optional
-		return data_objects, (data_min, data_max), max_obs_time
+		if n_events > 1:
+			return data_objects, (data_min, data_max), max_obs_time, event_to_event_weight_dict
+		else:
+			return data_objects, (data_min, data_max), max_obs_time, None
 	elif process_eval_set:
 		# for test set 
 		record_id, tt, vals, mask, mask_surv, labels, dur = eval_data[0]

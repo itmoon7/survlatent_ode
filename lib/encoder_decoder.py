@@ -412,16 +412,16 @@ class Decoder(nn.Module):
 			else:
 				if num_layer == 2:
 					# before
-					decoder = nn.Sequential(
-						nn.Linear(latent_dim, 10),
-						nn.Tanh(),
-						nn.Linear(10, mult_event_units) 
-						)
 					# decoder = nn.Sequential(
-					# 	nn.Linear(latent_dim, int(latent_dim/2)),
+					# 	nn.Linear(latent_dim, 10),
 					# 	nn.Tanh(),
-					# 	nn.Linear(int(latent_dim/2), mult_event_units) # just arbitrailiy choose 5
+					# 	nn.Linear(10, mult_event_units) 
 					# 	)
+					decoder = nn.Sequential(
+						nn.Linear(latent_dim, int(latent_dim/2)),
+						nn.Tanh(),
+						nn.Linear(int(latent_dim/2), mult_event_units) 
+						)
 				elif num_layer == 3:
 					decoder = nn.Sequential(
 						nn.Linear(latent_dim, int(latent_dim/2)),
@@ -431,14 +431,6 @@ class Decoder(nn.Module):
 						nn.Linear(int(latent_dim/2), mult_event_units)
 						)
 
-			# simple decoder
-			# decoder = nn.Sequential(
-			# 	nn.Linear(latent_dim, 1),
-			# 	# nn.Tanh(),
-			# 	# nn.Linear(10, 1),
-			# 	nn.Sigmoid()
-			# 	# nn.Linear(10, 1),
-			# 	)
 		else:
 			raise KeyError('Only support Cox and Softmax atm')
 		utils.init_network_weights(decoder, mode = surv_est)	

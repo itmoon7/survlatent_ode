@@ -165,7 +165,7 @@ class LatentODESub(LatentODE):
 		param_dics['units_gru'] = self.units_gru
 		param_dics['attn_num_heads'] = self.attn_num_heads
 
-		data_obj, self.min_max_tuple, self.max_obs_time = utils.get_data_obj_merged(data_train, data_valid, data_info_dic, device = self.device, feat_reconstr = feat_reconstr, max_pred_window = max_pred_window, n_events = self.n_events, random_seed = self.random_seed, param_dics = param_dics)
+		data_obj, self.min_max_tuple, self.max_obs_time, self.event_to_event_weight_dict = utils.get_data_obj_merged(data_train, data_valid, data_info_dic, device = self.device, feat_reconstr = feat_reconstr, max_pred_window = max_pred_window, n_events = self.n_events, random_seed = self.random_seed, param_dics = param_dics)
 		
 		batch_dict_valid = utils.remove_timepoints_wo_obs(utils.get_next_batch(data_obj["valid_dataloader"]))
 		# f = open('valid_dataloader_in_training.pkl', "wb") # prev : ckp_sig_feats_dic_Jan_21th_2021_binary_wo_duplicates_thresh_0_10, ckp_sig_feats_dic_Nov_13th_binary_mut_burden, ckp_sig_feats_dic_Nov_13th_binary, ckp_sig_feats_dic_Sep_25th_binary
@@ -291,7 +291,7 @@ class SurvLatentODE_Cox(LatentODESub):
 		raise NotImplementedError
 
 class SurvLatentODE(LatentODESub):
-	def __init__(self, dec_latent_dim = 20, enc_latent_dim = 40, enc_f_nn_layers = 3, dec_g_nn_layers = 3, num_units_ode = 50, num_units_gru = 50, input_dim = 20, reconstr_dim = None, device = None, gru_aug = False, attention_aug = False, attn_num_heads = 4, n_events = 1, temporal_encoding = False, mult_event_units = 5, haz_dec_layers = 2):
+	def __init__(self, dec_latent_dim = 20, enc_latent_dim = 40, enc_f_nn_layers = 3, dec_g_nn_layers = 3, num_units_ode = 50, num_units_gru = 50, input_dim = 20, reconstr_dim = None, device = None, gru_aug = False, attention_aug = False, attn_num_heads = 4, n_events = 1, temporal_encoding = False, haz_dec_final_units = 5, haz_dec_layers = 2):
 		self.surv_est = 'Hazard'
 		super().__init__(latent_dim = dec_latent_dim,
 						 rec_dim = enc_latent_dim,
@@ -306,7 +306,7 @@ class SurvLatentODE(LatentODESub):
 						 attn_num_heads = attn_num_heads,
 						 temporal_encoding = temporal_encoding,
 						 n_events = n_events, 
-						 mult_event_units = mult_event_units, 
+						 mult_event_units = haz_dec_final_units, 
 						 num_layer_hazard_dec = haz_dec_layers,
 						 reconstr_dim = reconstr_dim if reconstr_dim is not None else input_dim)
 
