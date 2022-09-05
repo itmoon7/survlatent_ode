@@ -12,7 +12,7 @@ Abstract : Effective learning from electronic health records (EHR) data for pred
 ![alt text](https://github.com/itmoon7/survlatent_ode/blob/main/survlatent_ode_architecture.png?raw=true)
 
 #### Model architecture of SurvLatent ODE: 
-The ODE-RNN encoder parametrizes a patient-specific temporal trajectory of covariates $x_i(0),...,x_i(p)$ into the latent embedding and describes approximate posterior over the initial latent variable $z_{i,0}$. The sampled initial latent variable $z_{i,0}$ is then decoded into the latent trajectory, $z_i^{t_m}  = (z_{i,1}, z_{i,2}, ..., z_{i,t_m})$ by calling a black-box differential equation solver ODESolve$(g_{\phi}, z_{i,0}, t = 0, ...,t_m)$. Finally, $m_\beta(\cdot)$, which consists of cause-specific decoder modules, subsequent fully connected layer, and softmax layer, maps the corresponding latent trajectory to estimate cause-specific hazard function for each event.
+The ODE-RNN encoder parametrizes a patient-specific temporal trajectory of covariates $x_i(0),...,x_i(p)$ into the latent embedding and describes approximate posterior over the initial latent variable $z_{i,0}$. The sampled initial latent variable $z_{i,0}$ is then decoded into the latent trajectory, $z_i^{t_m}  = (z_{i,1}, z_{i,2}, ..., z_{i,t_m})$ by calling a black-box differential equation solver ODESolve$(g_{\phi}, z_{i,0}, t = 0, ...,t_m)$. Finally, $m_\beta(\cdot)$, which consists of cause-specific decoder modules, subsequent fully connected layer, and softmax layer, maps the corresponding latent trajectory to estimate cause-specific hazard function for each event. Please see our [paper](https://arxiv.org/abs/2204.09633) for more details.
 
 #### Utilized Python packages
 torch 1.11.0 <br>
