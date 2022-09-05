@@ -29,41 +29,50 @@ from tqdm import tqdm
 import pickle
 
 class LatentODESub(LatentODE):  
-	def __init__(self, latent_dim = 20, rec_dim = 40, rec_layers = 3, gen_layers = 3, units_ode = 50, units_gru = 50, input_dim = 20, reconstr_dim = 20, device = None, gru_aug = False, attention_aug = False, attn_num_heads = 4, n_events = 1, temporal_encoding = False, num_layer_hazard_dec = 2, mult_event_units = 5):
+	def __init__(self, latent_dim=20, rec_dim=40, rec_layers=3, gen_layers=3, units_ode=50,
+				 units_gru=50, input_dim=20, reconstr_dim=20, device=None, gru_aug=False,
+				 attention_aug=False, attn_num_heads=4, n_events=1, temporal_encoding=False,
+				 num_layer_hazard_dec=2, mult_event_units=5):
 		
 		# create components for Latent ODE
 		ode_func_net = utils.create_net(latent_dim, latent_dim, 
-			n_layers = gen_layers, n_units = units_ode, nonlinear = nn.Tanh)
+										n_layers=gen_layers, n_units=units_ode,
+										nonlinear=nn.Tanh)
 
 		gen_ode_func = ODEFunc( # generative ode layer
-			input_dim = input_dim, 
-			latent_dim = latent_dim, 
-			ode_func_net = ode_func_net,
-			device = device).to(device)
+			input_dim=input_dim, 
+			latent_dim=latent_dim, 
+			ode_func_net=ode_func_net,
+			device=device).to(device)
 
 		enc_input_dim = int(input_dim) * 2 # for mask concatenation
 		ode_func_net = utils.create_net(rec_dim, rec_dim, 
-			n_layers = rec_layers, n_units = units_ode, nonlinear = nn.Tanh)
+			n_layers=rec_layers, n_units=units_ode, nonlinear=nn.Tanh)
 
 		# recognition ode layer
 		rec_ode_func = ODEFunc( 
-			input_dim = enc_input_dim, 
-			latent_dim = rec_dim,
-			ode_func_net = ode_func_net,
-			device = device).to(device)
+			input_dim=enc_input_dim, 
+			latent_dim=rec_dim,
+			ode_func_net=ode_func_net,
+			device=device).to(device)
 
-		z0_diffeq_solver = DiffeqSolver(enc_input_dim, rec_ode_func, "euler", latent_dim, odeint_rtol = 1e-3, odeint_atol = 1e-4, device = device)
-		encoder_z0 = Encoder_z0_ODE_RNN(rec_dim, enc_input_dim, z0_diffeq_solver, z0_dim = latent_dim, n_gru_units = units_gru, device = device).to(device)
+		z0_diffeq_solver = DiffeqSolver(enc_input_dim, rec_ode_func, "euler", latent_dim,
+			odeint_rtol=1e-3, odeint_atol=1e-4, device=device)
+		encoder_z0 = Encoder_z0_ODE_RNN(rec_dim, enc_input_dim, z0_diffeq_solver,
+			z0_dim=latent_dim, n_gru_units=units_gru, device=device).to(device)
 		
-		diffeq_solver = DiffeqSolver(input_dim, gen_ode_func, 'dopri5', latent_dim, odeint_rtol = 1e-3, odeint_atol = 1e-4, device = device)
+		diffeq_solver = DiffeqSolver(input_dim, gen_ode_func, 'dopri5', latent_dim,
+			odeint_rtol=1e-3, odeint_atol=1e-4, device=device)
 
 		decoder = Decoder(latent_dim, reconstr_dim).to(device)
 		if n_events == 1:
-			decoder_surv = Decoder(latent_dim, None, surv_est = self.surv_est).to(device)
+			decoder_surv = Decoder(latent_dim, None, surv_est=self.surv_est).to(device)
 		elif n_events == 2:
 			decoder_surv = []
-			decoder_surv_1 = Decoder(latent_dim, None, surv_est = self.surv_est, n_events = n_events, num_layer = num_layer_hazard_dec, mult_event_units = mult_event_units).to(device)
-			decoder_surv_2 = Decoder(latent_dim, None, surv_est = self.surv_est, n_events = n_events, num_layer = num_layer_hazard_dec, mult_event_units = mult_event_units).to(device)
+			decoder_surv_1 = Decoder(latent_dim, None, surv_est=self.surv_est, n_events=n_events,
+				num_layer=num_layer_hazard_dec, mult_event_units=mult_event_units).to(device)
+			decoder_surv_2 = Decoder(latent_dim, None, surv_est=self.surv_est, n_events=n_events,
+				num_layer=num_layer_hazard_dec, mult_event_units=mult_event_units).to(device)
 		else:
 			raise NotImplementedError
 		
@@ -104,7 +113,10 @@ class LatentODESub(LatentODE):
 	def get_min_max_data(self):
 		return self.min_max_tuple
 
-	def process_eval_data(self, data, data_info_dic, batch_size = 100, max_pred_window = None, n_samples = None, dataset = 'general', run_id = None, include_test_set = False, feat_reconstr = None, check_extrapolation = False, model_info = None, random_seed = 0):
+	def process_eval_data(self, data, data_info_dic, batch_size=100, max_pred_window=None,
+						  n_samples=None, dataset='general', run_id=None, include_test_set=False,
+						  feat_reconstr=None, check_extrapolation=False, model_info=None,
+						  random_seed=0):
 		
 		self.random_seed = random_seed
 		self.check_extrapolation = check_extrapolation
@@ -122,7 +134,10 @@ class LatentODESub(LatentODE):
 
 		# torch.manual_seed(random_seed)
 		# np.random.seed(random_seed)
-		data_obj = utils.get_data_obj_merged(None, data, data_info_dic, process_eval_set = True, device = self.device, feat_reconstr = feat_reconstr, max_pred_window = max_pred_window, n_events = self.n_events, random_seed = self.random_seed, param_dics = param_dics, min_max_tuple = self.min_max_tuple, max_obs_time = self.max_obs_time)
+		data_obj = utils.get_data_obj_merged(None, data, data_info_dic, process_eval_set=True,
+			device=self.device, feat_reconstr=feat_reconstr, max_pred_window=max_pred_window, 
+			n_events=self.n_events, random_seed=self.random_seed, param_dics=param_dics,
+			min_max_tuple=self.min_max_tuple, max_obs_time=self.max_obs_time)
 
 		return utils.remove_timepoints_wo_obs(utils.get_next_batch(data_obj["test_dataloader"]))
 
@@ -139,7 +154,11 @@ class LatentODESub(LatentODE):
 			return self.test_batch_dict
 		
 
-	def fit(self, data_train, data_valid, data_info_dic, device = None, n_epochs = 30, batch_size = 50, lr = 1e-2, max_pred_window = None, n_samples = None, run_id = None, surv_loss_scale = 10, n_latent_traj = 1, early_stopping = False, survival_loss_exp = True, train_info = None, feat_reconstr = None, check_extrapolation = False, wait_until_full_surv_loss = 15, dataset = 'general', random_seed = 0):
+	def fit(self, data_train, data_valid, data_info_dic, device=None, n_epochs=30, batch_size=50,
+			lr=1e-2, max_pred_window=None, n_samples=None, run_id=None, surv_loss_scale=10,
+			n_latent_traj=1, early_stopping=False, survival_loss_exp=True, train_info=None,
+			feat_reconstr=None, check_extrapolation=False, wait_until_full_surv_loss=15,
+			dataset='general', random_seed=0):
 		# check extrapolation
 		self.check_extrapolation = check_extrapolation
 		self.dataset = dataset
@@ -165,22 +184,31 @@ class LatentODESub(LatentODE):
 		param_dics['units_gru'] = self.units_gru
 		param_dics['attn_num_heads'] = self.attn_num_heads
 
-		data_obj, self.min_max_tuple, self.max_obs_time, self.event_to_event_weight_dict = utils.get_data_obj_merged(data_train, data_valid, data_info_dic, device = self.device, feat_reconstr = feat_reconstr, max_pred_window = max_pred_window, n_events = self.n_events, random_seed = self.random_seed, param_dics = param_dics)
+		(data_obj, self.min_max_tuple,
+			self.max_obs_time, self.event_to_event_weight_dict) = utils.get_data_obj_merged(
+																  		data_train,
+																		data_valid,
+																		data_info_dic,
+																		device=self.device,
+																		feat_reconstr=feat_reconstr,
+																		max_pred_window=max_pred_window,
+																		n_events=self.n_events,
+																		random_seed=self.random_seed,
+																		param_dics=param_dics
+																		)
 		
 		batch_dict_valid = utils.remove_timepoints_wo_obs(utils.get_next_batch(data_obj["valid_dataloader"]))
-		# f = open('valid_dataloader_in_training.pkl', "wb") # prev : ckp_sig_feats_dic_Jan_21th_2021_binary_wo_duplicates_thresh_0_10, ckp_sig_feats_dic_Nov_13th_binary_mut_burden, ckp_sig_feats_dic_Nov_13th_binary, ckp_sig_feats_dic_Sep_25th_binary
-		# pickle.dump(batch_dict_valid,f)
-		# f.close()
-		# min_max_tuple_to_save = (self.min_max_tuple[0].numpy(), self.min_max_tuple[1].numpy())
-		# np.save('min_max_tuple_at_train.npy', min_max_tuple_to_save)
-		# breakpoint()
 		param_dics['input_dim'] = data_obj["input_dim"]
 		utils.train_surv_model(self, data_obj, param_dics, 
-							   device = self.device, surv_est = self.surv_est, 
-							   max_pred_window = max_pred_window, run_id = run_id, dataset = dataset, survival_loss_scale = surv_loss_scale, n_latent_traj = n_latent_traj, early_stopping = early_stopping, survival_loss_exp = survival_loss_exp, train_info = train_info, n_events = self.n_events, wait_until_full_surv_loss = wait_until_full_surv_loss)
+							   device=self.device, surv_est=self.surv_est, max_pred_window=max_pred_window,
+							   run_id=run_id, dataset=dataset, survival_loss_scale=surv_loss_scale,
+							   n_latent_traj=n_latent_traj, early_stopping=early_stopping,
+							   survival_loss_exp=survival_loss_exp, train_info=train_info,
+							   n_events=self.n_events, wait_until_full_surv_loss=wait_until_full_surv_loss)
 		return
 
-	def get_surv_prob(self, batch_dict, model_info = None, max_pred_window = None, filename_suffix = None, device = None, test_batch_size = 200, reconstr_loss = False, n_events = 1):
+	def get_surv_prob(self, batch_dict, model_info=None, max_pred_window=None, filename_suffix=None,
+					  device=None, test_batch_size=200, reconstr_loss=False, n_events=1):
 		
 		last_observed_points = batch_dict['end_of_obs_idx'] # auxiliary info for plotting
 		num_samples = len(batch_dict['sample_ids'])
@@ -191,9 +219,17 @@ class LatentODESub(LatentODE):
 		
 		init_flag = True; count = 0;
 		for i in range(len(batch_total_observed_data)):
-			pred_y_, hazards_y, info = self.get_reconstruction_survival(batch_dict["tp_to_predict"], 
-																batch_total_observed_data[i], batch_dict["observed_tp"], batch_total_end_obs_idx[i], 
-																mask = batch_total_observed_mask[i], get_latent_hazard = True, temporal_encoding = self.temporal_encoding)
+			(pred_y_,
+				hazards_y,
+				info) = self.get_reconstruction_survival(
+								batch_dict["tp_to_predict"],
+								batch_total_observed_data[i],
+								batch_dict["observed_tp"],
+								batch_total_end_obs_idx[i],
+								mask=batch_total_observed_mask[i],
+								get_latent_hazard=True,
+								temporal_encoding=self.temporal_encoding
+								)
 			latent_states = info['latent_hazard']
 			if init_flag:
 				init_flag = False
@@ -209,16 +245,25 @@ class LatentODESub(LatentODE):
 		pred_y = torch.index_select(pred_y, 2, batch_dict['observed_tp_unnorm_dec'].int())#[:, :, batch_dict['non_missing_tp_pred'], :] 
 		
 		if n_events == 1:
-			surv_prob = self._get_surv_prob(hazards_y, batch_dict, last_observed_points, max_pred_window = max_pred_window, filename_suffix = filename_suffix, events_info_train_tuple = model_info['events_info_train_tuple'], n_events = n_events)
+			surv_prob = self._get_surv_prob(hazards_y, batch_dict, last_observed_points,
+											max_pred_window=max_pred_window,
+											filename_suffix=filename_suffix,
+											events_info_train_tuple=model_info['events_info_train_tuple'],
+											n_events=n_events)
 			return surv_prob
 		else:	
-			ef_surv_prob, cs_cif_total = self._get_surv_prob(hazards_y, batch_dict, last_observed_points, max_pred_window = max_pred_window, filename_suffix = filename_suffix, events_info_train_tuple = model_info['events_info_train_tuple'], n_events = n_events)
+			ef_surv_prob, cs_cif_total = self._get_surv_prob(
+										 		hazards_y,
+										 		batch_dict,
+												last_observed_points,
+												max_pred_window=max_pred_window,
+												filename_suffix=filename_suffix,
+												events_info_train_tuple=model_info['events_info_train_tuple'],
+												n_events=n_events
+												)
 			return ef_surv_prob, cs_cif_total
 
 	def get_reconst_traj(self, batch_dict = None, n_latent_traj = 1, credible_interval = False):
-		"""
-
-		"""
 		if credible_interval and n_latent_traj == 1:
 			raise ValueError('n_latent_traj must be greater than 1 to obtain credible interval')
 		elif not credible_interval and n_latent_traj > 1:
@@ -229,10 +274,16 @@ class LatentODESub(LatentODE):
 
 		if batch_dict is None:
 			# convert data into dataloader format 
-			ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names = self._pre_process_data(data, data_info_dic, max_pred_window = max_pred_window, dataset = dataset)
+			(ids, x, x_ext,
+				m, m_ext, ms,
+				t, t_ext,
+				e, dur, feat_names) = self._pre_process_data(data, data_info_dic,
+				max_pred_window = max_pred_window, dataset = dataset)
 
-			data_obj, _ = self._get_data_obj(ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, None, 
-											 dataset = dataset, device = self.device, max_pred_window = max_pred_window, min_max_tuple = model_info['min_max_data_tuple'], process_test_set = True)
+			data_obj, _ = self._get_data_obj(ids, x, x_ext, m, m_ext, ms, t, t_ext,
+				e, dur, feat_names, None, dataset = dataset, device = self.device,
+				max_pred_window = max_pred_window,
+				min_max_tuple = model_info['min_max_data_tuple'], process_test_set = True)
 
 			# get hazards and prediction
 			batch_dict = utils.get_next_batch(data_obj["test_dataloader"])
@@ -242,7 +293,8 @@ class LatentODESub(LatentODE):
 		last_observed_points = [] # auxiliary info for plotting
 		num_samples = len(batch_dict['sample_ids'])
 		for j in range(num_samples):
-			last_observed_point = batch_dict['observed_tp_unnorm'][batch_dict['observed_mask'][j].sum(axis = 1) > 0][-1]
+			last_observed_point = (batch_dict['observed_tp_unnorm']
+				[batch_dict['observed_mask'][j].sum(axis = 1) > 0][-1])
 			last_observed_points.append(last_observed_point)
 
 		if n_latent_traj > 1:
@@ -251,7 +303,8 @@ class LatentODESub(LatentODE):
 			"""
 			for i in tqdm(range(n_latent_traj), desc = 'getting ' + str(n_latent_traj) + ' trajectroies...'):
 				pred_y, _, info = self.get_reconstruction_survival(batch_dict["tp_to_predict"], 
-																batch_dict["observed_data"], batch_dict["observed_tp"], 
+																batch_dict["observed_data"],
+																batch_dict["observed_tp"], 
 																mask = batch_dict["observed_mask"])
 				
 				pred_y_curr = pred_y[0].detach().numpy()
@@ -271,27 +324,22 @@ class LatentODESub(LatentODE):
 
 			return pred_y_avg, pred_y_var
 		else:
-			pred_y, _, info = self.get_reconstruction_survival(batch_dict["tp_to_predict"], 
-																batch_dict["observed_data"], batch_dict["observed_tp"], 
+			pred_y, _, info = self.get_reconstruction_survival(batch_dict["tp_to_predict"],
+																batch_dict["observed_data"],
+																batch_dict["observed_tp"],
 																mask = batch_dict["observed_mask"])
-			breakpoint()
-			# get pred up until last observ idx and afterwards
-			# if batch_dict["end_of_obs_idx"] is None:
-			# 	pred_y_extr = None
-			# else:
-			# 	pred_y, pred_y_extr = pred_y[:, :, :batch_dict["end_of_obs_idx"], :], pred_y[:, :, batch_dict["end_of_obs_idx"]:, :]
-			return pred_y #self._get_surv_prob(hazards_y, batch_dict, last_observed_points, max_pred_window = max_pred_window, filename_suffix = filename_suffix, events_info_train_tuple = model_info['events_info_train_tuple'])
-		# return
-	# def get_feat_names():
-	# 	if self.feat_names is not None:
-	# 		return self.feat_names
+			return pred_y 
 
 class SurvLatentODE_Cox(LatentODESub):
 	def __init__(self):
 		raise NotImplementedError
 
 class SurvLatentODE(LatentODESub):
-	def __init__(self, dec_latent_dim = 20, enc_latent_dim = 40, enc_f_nn_layers = 3, dec_g_nn_layers = 3, num_units_ode = 50, num_units_gru = 50, input_dim = 20, reconstr_dim = None, device = None, gru_aug = False, attention_aug = False, attn_num_heads = 4, n_events = 1, temporal_encoding = False, haz_dec_final_units = 5, haz_dec_layers = 2):
+	def __init__(self, dec_latent_dim = 20, enc_latent_dim = 40, enc_f_nn_layers = 3,
+		dec_g_nn_layers = 3, num_units_ode = 50, num_units_gru = 50, input_dim = 20,
+		reconstr_dim = None, device = None, gru_aug = False, attention_aug = False,
+		attn_num_heads = 4, n_events = 1, temporal_encoding = False, haz_dec_final_units = 5,
+		haz_dec_layers = 2):
 		self.surv_est = 'Hazard'
 		super().__init__(latent_dim = dec_latent_dim,
 						 rec_dim = enc_latent_dim,
@@ -310,9 +358,11 @@ class SurvLatentODE(LatentODESub):
 						 num_layer_hazard_dec = haz_dec_layers,
 						 reconstr_dim = reconstr_dim if reconstr_dim is not None else input_dim)
 
-	def _get_surv_prob(self, hazards_y, batch_dict, last_observed_points, cred_interval = False, max_pred_window = None, filename_suffix = None, events_info_train_tuple = None, n_events = 1):
+	def _get_surv_prob(self, hazards_y, batch_dict, last_observed_points, cred_interval = False,
+		max_pred_window = None, filename_suffix = None, events_info_train_tuple = None, n_events = 1):
 		results = {'hazards_y':hazards_y}
-		return utils.compute_survival_curves(results, batch_dict, None, last_observed_points, surv_est = self.surv_est, n_events = n_events)
+		return utils.compute_survival_curves(results, batch_dict, None, last_observed_points,
+			surv_est = self.surv_est, n_events = n_events)
 
 	def _get_reconst_traj(self, data):
 		pass

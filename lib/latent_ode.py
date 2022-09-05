@@ -30,14 +30,7 @@ import time
 
 class LatentODE(nn.Module):
 	def __init__(self, input_dim, latent_dim, encoder_z0, decoder, decoder_surv, diffeq_solver, 
-		z0_prior, device, obsrv_std = None, 
-		use_binary_classif = False, gru_aug = False, attention = True, n_gru_units = 50): # consider GRU augment for hazard 
-
-		# super(LatentODE, self).__init__(
-		# 	input_dim = input_dim, latent_dim = latent_dim, 
-		# 	z0_prior = z0_prior, 
-		# 	device = device, obsrv_std = obsrv_std)
-		# breakpoint()
+				 z0_prior, device, obsrv_std=None, gru_aug=False, n_gru_units=50): 
 
 		super().__init__()
 
@@ -49,25 +42,15 @@ class LatentODE(nn.Module):
 		else:
 			self.decoder_surv_1 = decoder_surv[0]
 			self.decoder_surv_2 = decoder_surv[1]
-		# if self.surv_est == 'Hazard':
-		# 	self.learnedsoftplus = LearnedSoftPlus()
-
-		# self.obsrv_std = obsrv_std
-
-		# self.input_dim = input_dim
-		# self.latent_dim = latent_dim
-		# self.device = device
 		self.obsrv_std = torch.Tensor([obsrv_std]).to(device)
 		self.z0_prior = z0_prior
 		self.gru_aug = gru_aug
-		# self.attention = attention
 		self.n_gru_units = n_gru_units
 		
 		# GRU unit
 		if self.gru_aug:
 			print('Augmenting GRU...')
-			# self.GRU_prev_decoder = nn.Sequential(nn.Linear(self.latent_dim, self.n_gru_units + self.latent_dim))
-			self.GRU_update = GRU_unit(self.latent_dim, self.latent_dim, # fix this later  
+			self.GRU_update = GRU_unit(self.latent_dim, self.latent_dim,
 									   n_units = self.n_gru_units, gru_aug = True, 
 									   device=device).to(device)
 		
@@ -77,32 +60,32 @@ class LatentODE(nn.Module):
 			print('\n')
 
 			if self.n_events == 1:
-				self.attention_decoder = DecoderBlock(self.latent_dim, self.attn_num_heads, self.latent_dim).to(device)
+				self.attention_decoder = DecoderBlock(self.latent_dim,
+													  self.attn_num_heads,
+													  self.latent_dim).to(device)
 			elif self.n_events == 2:
-				self.attention_decoder_1 = DecoderBlock(self.latent_dim, self.attn_num_heads, self.latent_dim).to(device)
-				self.attention_decoder_2 = DecoderBlock(self.latent_dim, self.attn_num_heads, self.latent_dim).to(device)
-				# for i in range(self.n_events):
-				# 	self.attention_decoder.append(DecoderBlock(self.latent_dim, self.attn_num_heads, self.latent_dim).to(device))
-				# obtain merging network 
-				self.merging_decoder = nn.Sequential(nn.Linear(self.mult_event_units * self.n_events, self.n_events + 1)).to(device) # TODO : latent space for the attention output is 5 (see class Decoder)
+				self.attention_decoder_1 = DecoderBlock(self.latent_dim,
+														self.attn_num_heads,
+														self.latent_dim).to(device)
+				self.attention_decoder_2 = DecoderBlock(self.latent_dim,
+														self.attn_num_heads,
+														self.latent_dim).to(device)
+				self.merging_decoder = nn.Sequential(nn.Linear(self.mult_event_units*self.n_events,
+												 	 		   self.n_events + 1)).to(device) 
 				utils.init_network_weights(self.merging_decoder, mode = self.surv_est)	
 			else:
 				raise KeyError('more than 2 events will be implemented : TBD')
 
-			self.attention_decoder_data = DecoderBlock(self.latent_dim, self.attn_num_heads, self.latent_dim).to(device)
+			self.attention_decoder_data = DecoderBlock(self.latent_dim, self.attn_num_heads,
+													   self.latent_dim).to(device)
 		else:
 			if self.n_events == 2:
-				self.merging_decoder = nn.Sequential(nn.Linear(self.mult_event_units * self.n_events, self.n_events + 1)).to(device) # TODO : latent space for the attention output is 5 (see class Decoder)
+				self.merging_decoder = nn.Sequential(nn.Linear(self.mult_event_units*self.n_events,
+															   self.n_events + 1)).to(device)
 
-
-		# else:
-		# 	self.GRU_update = GRU_update
-		# # simple (non softmax based)
-		# self.decoder_hazard = nn.Sequential(
-		# 		nn.Linear(latent_dim, 1),
-		# 		nn.Sigmoid())
-
-	def _plot_recons_traj(self, observed_traj, pred_traj, pred_traj_extr, data_extra_info, mask = None, n_feats_per_plot = 9, feat_names = None, filename_suffix = None, curr_epoch = None, min_event_time = None, pred_horizon_hours = 100):
+	def _plot_recons_traj(self, observed_traj, pred_traj, pred_traj_extr, data_extra_info,
+						  mask=None, n_feats_per_plot=9, feat_names=None, filename_suffix=None,
+						  curr_epoch=None, min_event_time=None, pred_horizon_hours=100):
 		"""
 		observed_traj : (n_samples, n_timepoints, n_features), where unobserved datapoints are set to 0 
 		pred_traj : (n_samples, n_timepoints, n_features)
@@ -114,27 +97,17 @@ class LatentODE(nn.Module):
 		times_oi = torch.arange(0, np.shape(observed_traj)[1])
 
 		np.random.seed(0) # set seed 0
-		sampled_idx = np.random.choice(np.arange(len(observed_traj)), replace = False, size = 10)
+		sampled_idx = np.random.choice(np.arange(len(observed_traj)), replace=False, size=10)
 		print('sample idx : ', sampled_idx)
 		if self.check_extrapolation:
-			times_oi_extr_pred = torch.arange(np.shape(observed_traj)[1], np.shape(observed_traj)[1] + np.shape(pred_traj_extr)[1])
+			times_oi_extr_pred = torch.arange(np.shape(observed_traj)[1],
+											  np.shape(observed_traj)[1] + np.shape(pred_traj_extr)[1])
 			times_extr, obs_traj_extr, masks_extra = data_extra_info
-			# breakpoint()
-			# sample_ids_chosen = sample_ids[sampled_idx]
-			# df_mimic_icu_lab_vals_treats_full_meas = pd.read_csv('mimic_data/df_mimic_icu_lab_vals_treats_full_meas.csv', index_col = 'RANDID')
-			# try:
-			# 	observed_traj_extra = []
-			# 	for sample_id in sample_ids_chosen:
-			# 		df_oi = df_mimic_icu_lab_vals_treats_full_meas.loc[sample_id]
-			# 		observed_traj_extra.append(df_oi.loc[df_oi.times >= min_event_time])
-			# 	# df_mimic_ext_oi = 
-			# except:
-			# 	print('Some samples were not found in df. Skipping reconstruction...')
-			# 	return
-			# breakpoint()
 		
 		colors = ['k', 'g', 'r', 'b', 'c', 'y', 'm', 'lime', 'darkred', 'rosybrown']
-		for obs_traj_sample, pred_traj_sample, idx in zip(observed_traj[sampled_idx, :, :], pred_traj[sampled_idx, :, :], sampled_idx):
+		for obs_traj_sample, pred_traj_sample, idx in zip(observed_traj[sampled_idx, :, :],
+														  pred_traj[sampled_idx, :, :],
+														  sampled_idx):
 			fig, ax = plt.subplots()
 			# plot observed trajectory for each feat
 			for feat_num in range(n_feats_per_plot):
@@ -143,47 +116,54 @@ class LatentODE(nn.Module):
 				obs_traj_oi = obs_traj_sample[:, feat_num]
 				obs_traj_to_plot = obs_traj_oi[obs_traj_oi != 0]
 				times_to_plot = times_oi[obs_traj_oi != 0]
-				ax.scatter(times_to_plot, obs_traj_to_plot.cpu(), color = colors[feat_num], alpha = 0.5, label = feat_names[feat_num] + ' observed')
+				ax.scatter(times_to_plot, obs_traj_to_plot.cpu(), color=colors[feat_num],
+						   alpha=0.5, label=feat_names[feat_num] + ' observed')
 
 				# plot pred trajectory for each feat
 				pred_traj_sample_oi = pred_traj_sample[:, feat_num]
-				ax.plot(times_oi, pred_traj_sample_oi.cpu(), color = colors[feat_num], linestyle = 'dotted', label = feat_names[feat_num] + ' pred')
+				ax.plot(times_oi, pred_traj_sample_oi.cpu(), color=colors[feat_num],
+						linestyle='dotted', label=feat_names[feat_num] + ' pred')
 
-				# pred_traj_extr_sample_oi = pred_traj_extr_sample[:, feat_num]
-				# ax.plot(times_oi_extr, pred_traj_extr_sample_oi, color = colors[feat_num], linestyle = 'dashed', label = feat_names[feat_num] + ' extrapolation')
-				# breakpoint()
-				# break
-			# break
 			ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.095), ncol = 4)
-			fig.savefig("surv_curves/" + filename_suffix + "/reconstruction/" + str(curr_epoch) + '_reconst_feat_traj_for_sample_' + str(idx) + ".pdf", bbox_inches='tight')
+			fig.savefig(("surv_curves/" + filename_suffix + "/reconstruction/" +
+					     str(curr_epoch) + '_reconst_feat_traj_for_sample_' + str(idx) + ".pdf"),
+						bbox_inches='tight')
 			plt.close()
 		
 		if self.check_extrapolation:
-			for time_per_sample, mask_per_sample, obs_traj_extra_sample, pred_traj_extr_sample, idx in zip(times_extr, masks_extra, obs_traj_extr, pred_traj_extr[sampled_idx, :, :], sampled_idx):
+			for (time_per_sample, mask_per_sample,
+				obs_traj_extra_sample,
+				pred_traj_extr_sample, idx) in zip(times_extr, masks_extra, obs_traj_extr,
+												   pred_traj_extr[sampled_idx, :, :],
+												   sampled_idx):
 				fig, ax = plt.subplots()
 				# plot observed trajectory for each feat
 				for feat_num in range(n_feats_per_plot):
 					if feat_names[feat_num] in ['age', 'gender']:
 						continue
 					obs_traj_oi = obs_traj_extra_sample[:, feat_num]
-					# breakpoint()
-					# times_oi_extr = obs_traj_extra_sample.times.values
 					mask_per_sample_oi = mask_per_sample[:, feat_num]
 					obs_traj_to_plot = obs_traj_oi[mask_per_sample_oi == 1].cpu()
 					times_to_plot = time_per_sample[mask_per_sample_oi == 1] # at least one observed
-					ax.scatter(times_to_plot, obs_traj_to_plot, color = colors[feat_num], alpha = 0.5, label = feat_names[feat_num] + ' observed')
+					ax.scatter(times_to_plot, obs_traj_to_plot, color=colors[feat_num],
+							   alpha=0.5, label=feat_names[feat_num] + ' observed')
 
 					# plot pred trajectory for each feat
 					# pred_traj_sample_oi = pred_traj_sample[:, feat_num]
 					# ax.plot(times_oi, pred_traj_sample_oi, color = colors[feat_num], linestyle = 'dotted', alpha = 0.5, label = feat_names[feat_num] + ' pred')
 
 					pred_traj_extr_sample_oi = pred_traj_extr_sample[:, feat_num].cpu()
-					ax.plot(times_oi_extr_pred[0:pred_horizon_hours], pred_traj_extr_sample_oi[0:pred_horizon_hours], color = colors[feat_num], linestyle = 'dashed', label = feat_names[feat_num] + ' extrapolation')
+					ax.plot(times_oi_extr_pred[0:pred_horizon_hours],
+							pred_traj_extr_sample_oi[0:pred_horizon_hours],
+							color=colors[feat_num], linestyle='dashed',
+							label=feat_names[feat_num] + ' extrapolation')
 					# breakpoint()
 					# break
 				# break
-				ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.095), ncol = 4)
-				fig.savefig("surv_curves/" + filename_suffix + "/reconstruction/" + str(curr_epoch) + '_extrapol_feat_traj_for_sample_' + str(idx) + ".pdf", bbox_inches='tight')
+				ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.095), ncol=4)
+				fig.savefig(("surv_curves/" + filename_suffix + "/reconstruction/" +
+							 str(curr_epoch) + '_extrapol_feat_traj_for_sample_' +
+							 str(idx) + ".pdf"), bbox_inches='tight')
 				plt.close()
 		# in average
 		observed_traj_mean = observed_traj.mean(dim = 0).cpu()
@@ -193,17 +173,19 @@ class LatentODE(nn.Module):
 		for feat_num in range(n_feats_per_plot):
 			if feat_names[feat_num] in ['age', 'gender']:
 				continue
-			ax.scatter(times_oi, observed_traj_mean[:, feat_num], color = colors[feat_num], alpha = 0.5, label = feat_names[feat_num] + ' observed')
-			ax.plot(times_oi, pred_traj_mean[:, feat_num], color = colors[feat_num], linestyle = 'dotted', alpha = 0.5, label = feat_names[feat_num] + ' pred')
+			ax.scatter(times_oi, observed_traj_mean[:, feat_num], color=colors[feat_num],
+					   alpha=0.5, label=feat_names[feat_num] + ' observed')
+			ax.plot(times_oi, pred_traj_mean[:, feat_num], color=colors[feat_num],
+					linestyle='dotted', alpha=0.5, label=feat_names[feat_num] + ' pred')
 
 		ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.095), ncol = 4)
-		fig.savefig("surv_curves/" + filename_suffix + "/reconstruction/" + str(curr_epoch) + '_reconst_feat_traj_avg.pdf', bbox_inches='tight')
+		fig.savefig(("surv_curves/" + filename_suffix + "/reconstruction/" + str(curr_epoch) +
+					 '_reconst_feat_traj_avg.pdf'), bbox_inches='tight')
 		plt.close()
-
-		# breakpoint()
 		return
 
-	def get_reconstruction_traj(self, results, batch_dict, filename_suffix = None, feat_names = None, curr_epoch = None, min_event_time = None, high_prop_feats_idx = None):
+	def get_reconstruction_traj(self, results, batch_dict, filename_suffix=None, feat_names=None,
+								curr_epoch=None, min_event_time=None, high_prop_feats_idx=None):
 		"""
 		Get reconstrunction trajectory
 
@@ -234,15 +216,25 @@ class LatentODE(nn.Module):
 			# extrapolation_check = False
 		# breakpoint()
 		n_feats_per_plot = np.shape(observed_data)[2] if np.shape(observed_data)[2] < 10 else 10
-		self._plot_recons_traj(observed_data, pred_data, pred_data_extr, batch_dict['data_extra_info'], mask = observed_mask, filename_suffix = filename_suffix, feat_names = feat_names, curr_epoch = curr_epoch, min_event_time = min_event_time, n_feats_per_plot = n_feats_per_plot)
+		self._plot_recons_traj(observed_data, pred_data, pred_data_extr, batch_dict['data_extra_info'],
+							   mask=observed_mask, filename_suffix=filename_suffix,
+							   feat_names=feat_names, curr_epoch=curr_epoch, min_event_time=min_event_time,
+							   n_feats_per_plot=n_feats_per_plot)
 		return
 
-	def compute_all_losses(self, batch_dict, n_latent_traj = 1, kl_coef = 1., surv_est = None, survival_loss_scale = 10, reconstr_info = None):	
+	def compute_all_losses(self, batch_dict, n_latent_traj=1, kl_coef=1., surv_est=None,
+						   survival_loss_scale=10, reconstr_info=None):	
 	
 		if reconstr_info is None:
-			pred_y_mult_traj, hazards_y_mult_traj, info = self.get_reconstruction_survival(batch_dict["tp_to_predict"], 
-																						   batch_dict["observed_data"], batch_dict["observed_tp"], batch_dict['end_of_obs_idx'],
-																						   mask = batch_dict["observed_mask"], n_latent_traj = n_latent_traj, temporal_encoding = self.temporal_encoding)
+			(pred_y_mult_traj,
+				hazards_y_mult_traj,
+				info) = self.get_reconstruction_survival(batch_dict["tp_to_predict"], 
+														 batch_dict["observed_data"],
+														 batch_dict["observed_tp"],
+														 batch_dict['end_of_obs_idx'],
+														 mask=batch_dict["observed_mask"],
+														 n_latent_traj=n_latent_traj,
+														 temporal_encoding=self.temporal_encoding)
 		else:
 			pred_y_mult_traj, hazards_y_mult_traj, info = reconstr_info[0], reconstr_info[1], reconstr_info[2]
 		if n_latent_traj > 1:
@@ -253,12 +245,12 @@ class LatentODE(nn.Module):
 			hazards_y = hazards_y_mult_traj
 	
 		if self.check_extrapolation:
-			pred_y, pred_y_extr = pred_y_[:, :, :batch_dict["max_end_of_obs_idx"] + 1, :], pred_y_[:, :, batch_dict["max_end_of_obs_idx"] + 1:, :]
-			pred_y = torch.index_select(pred_y, 2, batch_dict['observed_tp_unnorm_dec'].int())#[:, :, batch_dict['non_missing_tp_pred'], :] # choose the relevent time points for reconstruction loss
+			pred_y, pred_y_extr = (pred_y_[:, :, :batch_dict["max_end_of_obs_idx"] + 1, :],
+				pred_y_[:, :, batch_dict["max_end_of_obs_idx"] + 1:, :])
+			pred_y = torch.index_select(pred_y, 2, batch_dict['observed_tp_unnorm_dec'].int())
 		else:
-			pred_y = pred_y_[:, :, :batch_dict["max_end_of_obs_idx"] + 1, :] #, pred_y[:, :, batch_dict["max_end_of_obs_idx"]:, :]
-			pred_y = torch.index_select(pred_y, 2, batch_dict['observed_tp_unnorm_dec'].int())#[:, :, batch_dict['non_missing_tp_pred'], :]
-		# breakpoint()
+			pred_y = pred_y_[:, :, :batch_dict["max_end_of_obs_idx"] + 1, :]
+			pred_y = torch.index_select(pred_y, 2, batch_dict['observed_tp_unnorm_dec'].int())
 		fp_mu, fp_std, fp_enc = info["first_point"]
 		fp_std = fp_std.abs()
 		fp_distr = Normal(fp_mu, fp_std)
@@ -276,8 +268,15 @@ class LatentODE(nn.Module):
 		kldiv_z0 = torch.mean(kldiv_z0,(1,2))
 
 		# Compute likelihood of all the points
-		rec_likelihood = utils.get_gaussian_likelihood(batch_dict["data_to_predict"], pred_y, mask = batch_dict["mask_predicted_data"], obsrv_std = self.obsrv_std) 
-		surv_likelihood = utils.get_survival_likelihood(hazards_y, batch_dict, surv_est = surv_est, n_events = self.n_events, event_to_event_weight_dict = self.event_to_event_weight_dict)
+		rec_likelihood = utils.get_gaussian_likelihood(batch_dict["data_to_predict"],
+													   pred_y,
+													   mask=batch_dict["mask_predicted_data"],
+													   obsrv_std=self.obsrv_std) 
+		surv_likelihood = utils.get_survival_likelihood(hazards_y,
+													    batch_dict,
+													    surv_est=surv_est,
+													    n_events=self.n_events,
+													    event_to_event_weight_dict=self.event_to_event_weight_dict)
 
 		loss = - torch.logsumexp(rec_likelihood -  kl_coef * kldiv_z0,0)
 		if torch.isnan(loss):
@@ -302,7 +301,8 @@ class LatentODE(nn.Module):
 		# decoded outputs. So just provide emprical means
 		if n_latent_traj > 1:
 			pred_y_mean = pred_y_mult_traj.mean(axis = 0)[None, :, :, :].detach()
-			pred_y_mean, pred_y_mean_extr = pred_y_mean[:, :, :batch_dict["max_end_of_obs_idx"], :], pred_y_mean[:, :, batch_dict["max_end_of_obs_idx"]:, :]
+			pred_y_mean, pred_y_mean_extr = (pred_y_mean[:, :, :batch_dict["max_end_of_obs_idx"], :],
+				pred_y_mean[:, :, batch_dict["max_end_of_obs_idx"]:, :])
 			results["pred_y"] = pred_y_mean
 			if self.check_extrapolation:
 				results["pred_y_extr"] = pred_y_mean_extr # extrapolate points 
@@ -313,7 +313,10 @@ class LatentODE(nn.Module):
 		# breakpoint()		
 		return results
 
-	def get_reconstruction_survival(self, time_steps_to_predict, truth, truth_time_steps, end_of_obs_idx, mask = None, n_latent_traj = 1, run_backwards = True, eps = 1e-7, get_multiple_traj = False, test_batch_size = 100, get_latent_hazard = False, temporal_encoding = False):
+	def get_reconstruction_survival(self, time_steps_to_predict, truth, truth_time_steps,
+									end_of_obs_idx, mask=None, n_latent_traj=1, run_backwards=True,
+									eps=1e-7, get_multiple_traj=False, test_batch_size=100,
+									get_latent_hazard=False, temporal_encoding=False):
 
 		if isinstance(self.encoder_z0, Encoder_z0_ODE_RNN) or \
 			isinstance(self.encoder_z0, Encoder_z0_RNN):
@@ -321,10 +324,15 @@ class LatentODE(nn.Module):
 			truth_w_mask = truth
 			if mask is not None:
 				truth_w_mask = torch.cat((truth, mask), -1)
-			first_point_mu, first_point_std = self.encoder_z0(truth_w_mask, truth_time_steps, run_backwards = run_backwards)
+			first_point_mu, first_point_std = self.encoder_z0(truth_w_mask,
+														 	  truth_time_steps,
+														 	  run_backwards=run_backwards)
 			means_z0 = first_point_mu#.repeat(1, 1, 1)
 			sigma_z0 = first_point_std#.repeat(1, 1, 1)
-			first_point_enc = utils.sample_standard_gaussian(first_point_mu, first_point_std, n_latent_traj = n_latent_traj, random_seed = self.random_seed)				
+			first_point_enc = utils.sample_standard_gaussian(first_point_mu,
+															 first_point_std,
+															 n_latent_traj=n_latent_traj,
+															 random_seed=self.random_seed)				
 		else:
 			raise Exception("Unknown encoder type {}".format(type(self.encoder_z0).__name__))
 		

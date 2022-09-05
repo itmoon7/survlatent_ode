@@ -436,67 +436,6 @@ def split_data_extrap(data_dict, dataset = ""):
 	split_dict["mode"] = "extrap"
 	return split_dict
 
-
-# def split_data_interp_survival(data_dict):
-# 	# this is actually what's called for physionet and framingham
-# 	device = get_device(data_dict["data"])
-
-# 	breakpoint()
-# 	split_dict = {"observed_data": data_dict["data"].clone(),
-# 				"observed_tp": data_dict["time_steps"].clone(),
-# 				"observed_tp_unnorm":data_dict["time_steps_unnorm"].clone(),
-# 				"data_to_predict": data_dict["data"].clone(),
-# 				"tp_to_predict": data_dict["time_stepts_pred_total"].clone(),
-# 				"tp_to_predict_unnorm": data_dict["time_stepts_pred_total_unnorm"].clone(),
-# 				"pred_horizon_idx": data_dict["pred_horizon_idx"].copy(),
-# 				"event_time_idx":data_dict["event_time_idx"].clone(),
-# 				"data_extra_info":data_dict["data_extra_info"],
-# 				"event_times":data_dict["event_times"],
-# 				"sample_ids":data_dict["sample_ids"],
-# 				"end_of_obs_idx":data_dict["end_of_obs_idx"],
-# 				"remaining_time_to_event":data_dict["remaining_time_to_event"]} # event_times is just the np array
-
-# 	split_dict["observed_mask"] = None 
-# 	split_dict["mask_predicted_data"] = None 
-# 	split_dict["labels"] = None 
-
-# 	if "mask" in data_dict and data_dict["mask"] is not None:
-# 		split_dict["observed_mask"] = data_dict["mask"].clone()
-# 		split_dict["mask_predicted_data"] = data_dict["mask"].clone()
-# 		split_dict["mask_surv"] = data_dict["mask_surv"].clone() if data_dict["mask_surv"] is not None else None
-
-# 	if ("labels" in data_dict) and (data_dict["labels"] is not None):
-# 		split_dict["labels"] = data_dict["labels"].clone()
-
-# 	# split_dict["mode"] = "interp"
-# 	return split_dict
-
-
-# def split_data_interp(data_dict):
-# 	# this is actually what's called for physionet and framingham
-# 	device = get_device(data_dict["data"])
-
-# 	split_dict = {"observed_data": data_dict["data"].clone(),
-# 				"observed_tp": data_dict["time_steps"].clone(),
-# 				"data_to_predict": data_dict["data"].clone(),
-# 				"tp_to_predict": data_dict["time_steps"].clone()}
-
-# 	split_dict["observed_mask"] = None 
-# 	split_dict["mask_predicted_data"] = None 
-# 	split_dict["labels"] = None 
-
-# 	if "mask" in data_dict and data_dict["mask"] is not None:
-# 		split_dict["observed_mask"] = data_dict["mask"].clone()
-# 		split_dict["mask_predicted_data"] = data_dict["mask"].clone()
-
-# 	if ("labels" in data_dict) and (data_dict["labels"] is not None):
-# 		split_dict["labels"] = data_dict["labels"].clone()
-
-# 	split_dict["mode"] = "interp"
-# 	return split_dict
-
-
-
 def add_mask(data_dict):
 	data = data_dict["observed_data"]
 	mask = data_dict["observed_mask"]
@@ -2262,17 +2201,6 @@ def display_performance_at_quantiles(test_stat_dic, ef_surv = False, n_events = 
 	print('AUC(t) at the percentiles : ', test_stat_dic['auc'])
 	print('mean AUC(t) over 25-75 percentile : ', np.round(test_stat_dic['mean_auc'], 4))
 	print('Integrated BS(t) over 25-75 percentile : ', np.round(test_stat_dic['ibs'], 4))
-	# else:
-	# 	for key, value in test_stat_dic['bs'].items():
-	# 		test_stat_dic['bs'][key] = np.round(value, 4)
-	# 	print('BS(t) at the percentiles : ', test_stat_dic['bs'])
-
-
-	# 	breakpoint()
-	# 	print('auc : ', test_stat_dic['auc'])
-	# 	print('mean auc across quants : ', test_stat_dic['mean_auc'])
-	# 	# print('c_idx : ', test_stat_dic['c_idx'])
-	# 	# print('mean c-idx across quants : ', test_stat_dic['mean_c_idx'])
 	return
 
 
