@@ -1,9 +1,9 @@
  
 
 ## Notebook examples
-In the provided examples, We will utilize the [Framingham dataset (https://biolincc.nhlbi.nih.gov/media/teachingstudies/FHS_Teaching_Longitudinal_Data_Documentation_2021a.pdf?link_time=2022-02-03_18:20:47.023970), a publicly available longitudinal dataset, which aims to better understand the etiology of cardiovascular disease.
-1. See [Notebook example](https://github.com/itmoon7/survlatent_ode/blob/main/notebook_example.ipynb) for the time to DEATH.
-2. See [Notebook example](https://github.com/itmoon7/survlatent_ode/blob/main/notebook_example_competing_events.ipynb) for the time to ANYCHD while modeling DEATH as a competing event. 
+In the provided examples, We will utilize the [Framingham dataset](https://biolincc.nhlbi.nih.gov/media/teachingstudies/FHS_Teaching_Longitudinal_Data_Documentation_2021a.pdf?link_time=2022-02-03_18:20:47.023970), a publicly available longitudinal dataset, which aims to better understand the etiology of cardiovascular disease.
+1. See [Notebook example I](https://github.com/itmoon7/survlatent_ode/blob/main/notebook_example.ipynb) for the time to DEATH.
+2. See [Notebook example II](https://github.com/itmoon7/survlatent_ode/blob/main/notebook_example_competing_events.ipynb) for the time to ANYCHD while modeling DEATH as a competing event. 
 
 ### SurvLatent ODE
 
