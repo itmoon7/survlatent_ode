@@ -22,12 +22,9 @@ lifelines 0.38.0
 
 <!-- <img src="https://render.githubusercontent.com/render/math?math=x_{1,2} = \frac{-b \pm \sqrt{b^2-4ac}}{2b}"> -->
 #### Citation :
-@misc{moon2022survlatent,
-      title={SurvLatent ODE : A Neural ODE based time-to-event model with competing risks for longitudinal data improves cancer-associated Deep Vein Thrombosis (DVT) prediction}, 
-      author={Intae Moon and Stefan Groha and Alexander Gusev},
-      year={2022},
-      eprint={2204.09633},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG}
+@article{moon2022survlatent,
+  title={SurvLatent ODE: A Neural ODE based time-to-event model with competing risks for longitudinal data improves cancer-associated Deep Vein Thrombosis (DVT) prediction},
+  author={Moon, Intae and Groha, Stefan and Gusev, Alexander},
+  journal={arXiv preprint arXiv:2204.09633},
+  year={2022}
 }
-
