@@ -3,7 +3,7 @@ See [Notebook example](https://github.com/itmoon7/survlatent_ode/blob/main/noteb
 
 ### SurvLatent ODE
 
-Abstract : Effective learning from electronic health records (EHR) data for prediction of clinical outcomes is often challenging because of features recorded at irregular timesteps and loss to follow-up as well as competing events such as death or disease progression. To that end, we propose a generative time-to-event model, SurvLatent ODE, which adopts an Ordinary Differential Equation-based Recurrent Neural Networks (ODE-RNN) as an encoder to effectively parameterize a latent representation under irregularly sampled data. Our model then utilizes the latent representation to flexibly estimate survival times for multiple competing events without specifying shapes of event-specific hazard function. We demonstrate competitive performance of our model on MIMIC-III, a freely-available longitudinal dataset collected from critical care units, on predicting hospital mortality as well as the in-house data on predicting onset of Deep Vein Thrombosis (DVT), a life-threatening complication for patients with cancer, with death as a competing event. SurvLatent ODE outperforms the current clinical standard Khorana Risk scores for stratifying DVT risk groups, while providing clinically meaningful and interpretable latent representations.
+Abstract : Effective learning from electronic health records (EHR) data for prediction of clinical outcomes is often challenging because of features recorded at irregular timesteps and loss to follow-up as well as competing events such as death or disease progression. To that end, we propose a generative time-to-event model, SurvLatent ODE, which adopts an Ordinary Differential Equation-based Recurrent Neural Networks (ODE-RNN) as an encoder to effectively parameterize dynamics of latent states under irregularly sampled input data. Our model then utilizes the resulting latent embedding to flexibly estimate survival times for multiple competing events without specifying shapes of event-specific hazard function. We demonstrate competitive performance of our model on MIMIC-III, a freely-available longitudinal dataset collected from critical care units, on predicting hospital mortality as well as the data from the Dana-Farber Cancer Institute (DFCI) on predicting onset of Venous Thromboembolism (VTE), a life-threatening complication for patients with cancer, with death as a competing event. SurvLatent ODE outperforms the current clinical standard Khorana Risk scores for stratifying VTE risk groups, while providing clinically meaningful and interpretable latent representations.
 
 ![alt text](https://github.com/itmoon7/survlatent_ode/blob/main/survlatent_ode_architecture.png?raw=true)
 
@@ -22,12 +22,9 @@ lifelines 0.38.0
 
 <!-- <img src="https://render.githubusercontent.com/render/math?math=x_{1,2} = \frac{-b \pm \sqrt{b^2-4ac}}{2b}"> -->
 #### Citation :
-@misc{moon2022survlatent,
-      title={SurvLatent ODE : A Neural ODE based time-to-event model with competing risks for longitudinal data improves cancer-associated Deep Vein Thrombosis (DVT) prediction}, 
-      author={Intae Moon and Stefan Groha and Alexander Gusev},
-      year={2022},
-      eprint={2204.09633},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG}
+@article{moon2022survlatent,
+  title={SurvLatent ODE: A Neural ODE based time-to-event model with competing risks for longitudinal data improves cancer-associated Deep Vein Thrombosis (DVT) prediction},
+  author={Moon, Intae and Groha, Stefan and Gusev, Alexander},
+  journal={arXiv preprint arXiv:2204.09633},
+  year={2022}
 }
-
