@@ -38,6 +38,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 import itertools
+import ipdb # for debugging
 
 def makedirs(dirname):
 	if not os.path.exists(dirname):
@@ -49,7 +50,6 @@ def save_checkpoint(state, save, epoch):
 	filename = os.path.join(save, 'checkpt-%04d.pth' % epoch)
 	torch.save(state, filename)
 
-	
 def get_logger(logpath, filepath, package_files=[],
 			   displaying=True, saving=True, debug=False):
 	logger = logging.getLogger()
@@ -74,7 +74,6 @@ def get_logger(logpath, filepath, package_files=[],
 			logger.info(package_f.read())
 
 	return logger
-
 
 def inf_generator(iterable):
 	"""Allows training with DataLoaders in a single infinite loop:
@@ -121,7 +120,6 @@ def split_last_dim(data):
 		res = data[:,:last_dim], data[:,last_dim:]
 	return res
 
-
 def init_network_weights(net, std = 0.1, mode = None):
 	for idx, m in enumerate(net.modules()):
 		if isinstance(m, nn.Linear):
@@ -134,7 +132,6 @@ def init_network_weights(net, std = 0.1, mode = None):
 
 def flatten(x, dim):
 	return x.reshape(x.size()[:dim] + (-1, ))
-
 
 def subsample_timepoints(data, time_steps, mask, n_tp_to_sample = None):
 	# n_tp_to_sample: number of time points to subsample. If not None, sample exactly n_tp_to_sample points
@@ -172,8 +169,6 @@ def subsample_timepoints(data, time_steps, mask, n_tp_to_sample = None):
 				mask[i, tp_to_set_to_zero] = 0.
 
 	return data, time_steps, mask
-
-
 
 def cut_out_timepoints(data, time_steps, mask, n_points_to_cut = None):
 	# n_points_to_cut: number of consecutive time points to cut out
@@ -231,8 +226,6 @@ def split_train_test_data_and_time(data, time_steps, train_fraq = 0.8):
 
 	return data_train, data_test, train_time_steps, test_time_steps
 
-
-
 def get_next_batch(dataloader):
 	data_dict = dataloader.__next__()
 
@@ -271,7 +264,6 @@ def update_learning_rate(optimizer, decay_rate = 0.999, lowest = 1e-3):
 		lr = max(lr * decay_rate, lowest)
 		param_group['lr'] = lr
 
-
 def linspace_vector(start, end, n_points):
 	# start is either one value or a vector
 	size = np.prod(start.size())
@@ -293,7 +285,6 @@ def reverse(tensor):
 	idx = [i for i in range(tensor.size(0)-1, -1, -1)]
 	return tensor[idx]
 
-
 def create_net(n_inputs, n_outputs, n_layers = 1, 
 	n_units = 100, nonlinear = nn.Tanh):
 	layers = [nn.Linear(n_inputs, n_units)]
@@ -305,13 +296,11 @@ def create_net(n_inputs, n_outputs, n_layers = 1,
 	layers.append(nn.Linear(n_units, n_outputs))
 	return nn.Sequential(*layers)
 
-
 def get_item_from_pickle(pickle_file, item_name):
 	from_pickle = load_pickle(pickle_file)
 	if item_name in from_pickle:
 		return from_pickle[item_name]
 	return None
-
 
 def get_dict_template():
 	return {"sample_ids": None,
@@ -333,7 +322,6 @@ def get_dict_template():
 			"feat_names":None
 			}
 
-
 def normalize_data(data):
 	reshaped = data.reshape(-1, data.size(-1))
 
@@ -352,7 +340,6 @@ def normalize_data(data):
 		raise Exception("nans!")
 
 	return data_norm, att_min, att_max
-
 
 def normalize_masked_data(data, mask, att_min, att_max, extra = False, scale_param = 1.0, device = None):
 	# we don't want to divide by zero
@@ -397,7 +384,6 @@ def normalize_masked_data(data, mask, att_min, att_max, extra = False, scale_par
 		# else:
 		return data_norm, att_min, att_max
 
-
 def shift_outputs(outputs, first_datapoint = None):
 	outputs = outputs[:,:,:-1,:]
 
@@ -406,9 +392,6 @@ def shift_outputs(outputs, first_datapoint = None):
 		first_datapoint = first_datapoint.reshape(1, n_traj, 1, n_dims)
 		outputs = torch.cat((first_datapoint, outputs), 2)
 	return outputs
-
-
-
 
 def split_data_extrap(data_dict, dataset = ""):
 	device = get_device(data_dict["data"])
@@ -445,7 +428,6 @@ def add_mask(data_dict):
 
 	data_dict["observed_mask"] = mask
 	return data_dict
-
 
 def subsample_observed_data(data_dict, n_tp_to_sample = None, n_points_to_cut = None):
 	# n_tp_to_sample -- if not None, randomly subsample the time points. The resulting timeline has n_tp_to_sample points
@@ -649,6 +631,7 @@ def perform_bootstrap_quantile(test_stat, quant_to_event_oi_train_test_surv_dict
 		# sampled_stats_dic['c_idx'] = create_perf_quantile_dict(quant_to_event_oi_train_test_surv_dict)
 		# sampled_ses_dic['c_idx'] = create_perf_quantile_dict(quant_to_event_oi_train_test_surv_dict)
 
+	skipped_iter = 0
 	for i in tqdm(range(boot_iter), desc = 'Bootstrapping...'):
 		# for each quantile
 		for quant, (event_oi_train, event_oi, surv_metric_oi, quant_time, surv_metric_oi_cum, last_observed_points_oi) in quant_to_event_oi_train_test_surv_dict.items():
@@ -659,17 +642,27 @@ def perform_bootstrap_quantile(test_stat, quant_to_event_oi_train_test_surv_dict
 			if not ef_surv:
 				last_observed_points_oi_sampled = last_observed_points_oi[resampled_indicies]
 			if ef_surv:
-				bs = brier_score(event_oi_train, event_oi_sampled, metric_oi_sampled, quant_time)[1][0]
+				try:
+					bs = brier_score(event_oi_train, event_oi_sampled, metric_oi_sampled, quant_time)[1][0]
+				except:
+					print(f"Invalid time window. Skipping the current bootstrap iteration: {i}")
+					skipped_iter += 1
+					continue
 				sampled_stats_dic['bs'][quant].append(bs)
 			else:
-				auc, mean_auc = cumulative_dynamic_auc(event_oi_train, event_oi_sampled, metric_oi_sampled, quant_time)
+				try:
+					auc, mean_auc = cumulative_dynamic_auc(event_oi_train, event_oi_sampled, metric_oi_sampled, quant_time)
+				except:
+					print(f"Invalid time window. Skipping the current bootstrap iteration: {i}")
+					skipped_iter += 1
+					continue
 				sampled_stats_dic['auc'][quant].append(auc[0])
 				bs = brier_score(event_oi_train, event_oi_sampled, 1-metric_oi_sampled, quant_time)[1][0]
 				sampled_stats_dic['bs'][quant].append(bs)
 				# breakpoint()
 	for metric, sub_dict in sampled_stats_dic.items():
 		for quant, metric_vals in sub_dict.items():
-			sampled_ses_dic[metric][quant] = np.round(math.sqrt(1/boot_iter * sum((np.asarray(metric_vals) - np.mean(metric_vals))**2)), 4)
+			sampled_ses_dic[metric][quant] = np.round(math.sqrt(1/(boot_iter-skipped_iter) * sum((np.asarray(metric_vals) - np.mean(metric_vals))**2)), 4)
 	return sampled_ses_dic
 
 def perform_bootstrap_v2(test_stat, event_oi_train, event_oi, surv_metric_oi, surv_metric_oi_mean, test_quantile_times, boot_iter = 5000, alpha = 0.05):
@@ -818,7 +811,6 @@ def perform_bootstrap(test_stat, len_samples_oi, func = None, func_args = None, 
 		delta_conf_int = (np.round(lower_bound,6), np.round(upper_bound,6))
 		return sampled_se, delta_conf_int
 
-
 def compute_dynamic_auc(surv_prob, data_dict_train, data_dict_test, eval_info_dic_train, eval_info_dic_train_test, event_time_horizon = None):
 	"""
 	Compute AUC in real-time
@@ -891,7 +883,6 @@ def compute_dynamic_auc(surv_prob, data_dict_train, data_dict_test, eval_info_di
 			# print('\n')
 	return perf_per_round_dic
 
-
 def get_remaining_time_to_event(data_dict, num_samples, torch_ver = False):
 	if torch_ver:
 		remaining_time_to_event = torch.zeros(num_samples)#.to(device)
@@ -905,7 +896,6 @@ def get_remaining_time_to_event(data_dict, num_samples, torch_ver = False):
 			remaining_time_to_event.append(data_dict['event_times'][j] - last_observed_point)
 	# breakpoint()
 	return remaining_time_to_event
-
 
 def compute_auc_from_last_obs(surv_prob, data_train_tuple, data_test_tuple, event_time_horizon = None, bootstrap = False):
 	"""
@@ -1088,7 +1078,6 @@ def plot_perf_time(estimate, mean_est, metric = None, event_time_horizon = None,
 		pickle.dump(perf_dic_real_time,f)
 		f.close()
 	return
-
 
 def compute_integrated_brier_score(surv_prob, data_train_tuple, data_test_tuple, event_time_horizon = None, bootstrap = False, plot = False, filename_suffix = None, curr_epoch = None):
 	"""
@@ -1515,6 +1504,7 @@ def variable_time_collate_fn_survival(batch, device = torch.device("cpu"), data_
 			mask = mask.to(device)
 			
 			mask_surv = mask_surv.to(device) # mask for survival. only use hazard from the latest observation to its time of the event
+			assert mask_surv.sum() > 0, f"tte value has to be greater than the lastest observation time for ID: {record_id}"
 
 			if labels is not None:
 				labels = labels.to(device)
@@ -1569,6 +1559,7 @@ def variable_time_collate_fn_survival(batch, device = torch.device("cpu"), data_
 			vals = vals.to(device)
 			mask = mask.to(device)
 			mask_surv = mask_surv.to(device) # mask for survival. only use hazard from the latest observation to its time of the event
+			assert mask_surv.sum() > 0, f"tte value has to be greater than the lastest observation time for ID: {record_id}"
 
 			if labels is not None:
 				labels = labels.to(device)
@@ -2204,7 +2195,7 @@ def display_performance_at_quantiles(test_stat_dic, ef_surv = False, n_events = 
 	return
 
 
-def pre_process_data(data, data_info_dic, max_pred_window = None, n_events = 1, dataset = 'general', random_seed = 0): 
+def pre_process_data(data, data_info_dic, max_pred_window = None, n_events = 1, dataset = 'general', exclude_samples_wo_pred_window = True, random_seed = 0): 
 		
 	dat_cat = data[data_info_dic['feat_cat']].copy()
 	# data preprocessing before missing values are replaced by 0
@@ -2226,7 +2217,10 @@ def pre_process_data(data, data_info_dic, max_pred_window = None, n_events = 1, 
 	if n_events > 1:
 		times = np.vstack((time, time)).T 
 		events_ = data[data_info_dic['event_col']].values
-		durations_ = data[data_info_dic['time_to_event_col']].values - times
+		if max_pred_window is not None:
+			durations_ = data[data_info_dic['time_to_event_col']].clip(upper=max_pred_window).values - times  # Clip tte wth max_pred_window
+		else:
+			durations_ = data[data_info_dic['time_to_event_col']].values - times  # Clip tte wth max_pred_window
 		event = []; durations = []
 		for events_entry, dur_entry in zip(events_, durations_):
 			if sum(events_entry) == 0: # event free
@@ -2249,41 +2243,48 @@ def pre_process_data(data, data_info_dic, max_pred_window = None, n_events = 1, 
 		# breakpoint()
 	else:
 		event = data[data_info_dic['event_col']].values
-		durations = (data[data_info_dic['time_to_event_col']] - data[data_info_dic['time_col']]).values
+		if max_pred_window is not None:
+			durations = (data[data_info_dic['time_to_event_col']].clip(upper=max_pred_window) - data[data_info_dic['time_col']]).values  # Clip tte wth max_pred_window
+		else:
+			durations = (data[data_info_dic['time_to_event_col']] - data[data_info_dic['time_col']]).values
 
 	ids_ = data[data_info_dic['id_col']].values
 	sample_id_to_range_dic = {}; got_first_idx = False; prev_id_ = ids_[0]; start_idx = None; end_idx = None
 	if n_events > 1:
-		times_ = data[data_info_dic['time_col']].values; idx_ = 0
-		for id_, time_, dur_ in zip(ids_, times_, durations):
+		times_ = data[data_info_dic['time_col']].values
+		for idx, (id_, time_, dur_) in enumerate(zip(ids_, times_, durations)):
 			if prev_id_ != id_:
 				sample_id_to_range_dic[prev_id_] = (start_idx, end_idx)
 				got_first_idx = False; start_idx = None; end_idx = None
 			if not got_first_idx:
 				start_idx = idx_
 				got_first_idx = True
-
 			if dur_ > 0 and got_first_idx: # only take into account observations before the event of interest
 				end_idx = idx_ + 1
+			else:
+				end_idx = None
 			prev_id_ = id_
-			idx_ += 1
+			# idx_ += 1
 		# for the last sample
 		sample_id_to_range_dic[prev_id_] = (start_idx, end_idx)
 		# breakpoint()
 	else:
-		for idx_, id_ in enumerate(ids_):
+		for idx_, (id_, dur_) in enumerate(zip(ids_, durations)):
 			if prev_id_ != id_:
-				sample_id_to_range_dic[prev_id_] = (start_idx, idx_)
+				sample_id_to_range_dic[prev_id_] = (start_idx, end_idx)
 				got_first_idx = False; start_idx = None; end_idx = None
 			if not got_first_idx:
 				start_idx = idx_
 				got_first_idx = True
+			if dur_ > 0 and got_first_idx:  # only take into account observations before the event of interest
+				end_idx = idx_ + 1
+			else:
+				end_idx = None
 			prev_id_ = id_
 		# for the last sample
-		sample_id_to_range_dic[prev_id_] = (start_idx, idx_ + 1)
+		sample_id_to_range_dic[prev_id_] = (start_idx, end_idx)
 	# set missing values to 0; all zeroed values will be masked
-	x_ = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value = 0.0).fit_transform(x)
-
+	x_ = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value=0.0).fit_transform(x)
 	sampled_ids = sorted(set(data[data_info_dic['id_col']]))
 	skipped_samples = []; # those who experience event at time t which corresponds to the last observed time (i.e. observed remaining tte = 0))
 	if dataset == 'general':
@@ -2294,9 +2295,12 @@ def pre_process_data(data, data_info_dic, max_pred_window = None, n_events = 1, 
 			# if id_ in sampled_ids: # make sure id_ belongs to the sampled cohort
 			ids.append(id_)
 			start, end = sample_id_to_range_dic[id_]
-			if end is None:
-				skipped_samples.append(id_)
-				continue
+			if exclude_samples_wo_pred_window:
+				if end is None:
+					skipped_samples.append(id_)
+					continue
+			else:
+				assert end is not None, f"tte value has to be greater than the lastest observation time for ID: {id_}"
 			x.append(x_[start:end])
 			m.append((x_[start:end] != 0)*1)
 			t.append(time[start:end])
@@ -2309,7 +2313,7 @@ def pre_process_data(data, data_info_dic, max_pred_window = None, n_events = 1, 
 				if remain_dur <= 0:
 					e.append(0)
 					remain_dur = max(0, int(max_pred_window - dur_from_last_obs - last_obs_time))
-					dur_from_last_obs = min(dur_from_last_obs, int(max_pred_window - last_obs_time))
+					dur_from_last_obs = min(dur_from_last_obs, int(max_pred_window - last_obs_time))  # Make sure dur_from_last_obs >= 0
 					dur.append(durations[start:end] - (dur_from_init_obs - max_pred_window)) # administratively censor samples at the max prediction time window
 				else:
 					e.append(event[start:end][-1]) 
@@ -2328,11 +2332,11 @@ def pre_process_data(data, data_info_dic, max_pred_window = None, n_events = 1, 
 	print('n = ', len(skipped_samples))
 	return ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, max(t_end)
 
-def get_data_obj_merged(data_train, data_valid, data_info_dic, n_samples = None, max_pred_window = None, n_events = 1, dataset = 'general', random_seed = 0, device = None, feat_reconstr = None, process_eval_set = False, check_extrapolation = False, param_dics = None, min_max_tuple = None, max_obs_time = None):
+def get_data_obj_merged(data_train, data_valid, data_info_dic, n_samples = None, max_pred_window = None, n_events = 1, dataset = 'general', random_seed = 0, device = None, feat_reconstr = None, process_eval_set = False, check_extrapolation = False, param_dics = None, min_max_tuple = None, max_obs_time = None, exclude_samples_wo_pred_window = True):
 
 	if process_eval_set:
 		eval_data = []
-		ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, _ = utils.pre_process_data(data_valid, data_info_dic, max_pred_window = max_pred_window, n_events = n_events, random_seed = random_seed)
+		ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, _ = utils.pre_process_data(data_valid, data_info_dic, max_pred_window = max_pred_window, n_events = n_events, random_seed = random_seed, exclude_samples_wo_pred_window=exclude_samples_wo_pred_window)
 		# breakpoint()
 		if check_extrapolation:
 			for id_, x_, x_ext_, m_, m_ext_, ms_, t_, t_ext_, e_, dur_ in zip(ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur):
@@ -2345,21 +2349,21 @@ def get_data_obj_merged(data_train, data_valid, data_info_dic, n_samples = None,
 		if n_events > 1: train_events = []
 		if check_extrapolation:
 			# train
-			ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, max_obs_time = utils.pre_process_data(data_train, data_info_dic, max_pred_window = max_pred_window, n_events = n_events, random_seed = random_seed)
+			ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, max_obs_time = utils.pre_process_data(data_train, data_info_dic, max_pred_window = max_pred_window, n_events = n_events, random_seed = random_seed, exclude_samples_wo_pred_window=exclude_samples_wo_pred_window)
 			for id_, x_, x_ext_, m_, m_ext_, ms_, t_, t_ext_, e_, dur_ in zip(ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur):
 				train_data.append((str(id_), torch.tensor(t_, dtype = torch.float), torch.tensor(t_ext_, dtype = torch.float), torch.tensor(x_, dtype = torch.float), torch.tensor(x_ext_, dtype = torch.float), torch.tensor(m_, dtype = torch.float), torch.tensor(m_ext_, dtype = torch.float), torch.tensor(ms_, dtype = torch.float), torch.tensor(e_, dtype = torch.float), torch.tensor(dur_, dtype = torch.float)))
 			# valid
-			ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, _ = utils.pre_process_data(data_valid, data_info_dic, max_pred_window = max_pred_window, n_events = n_events, random_seed = random_seed)
+			ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, _ = utils.pre_process_data(data_valid, data_info_dic, max_pred_window = max_pred_window, n_events = n_events, random_seed = random_seed, exclude_samples_wo_pred_window=exclude_samples_wo_pred_window)
 			for id_, x_, x_ext_, m_, m_ext_, ms_, t_, t_ext_, e_, dur_ in zip(ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur):
 				valid_data.append((str(id_), torch.tensor(t_, dtype = torch.float), torch.tensor(t_ext_, dtype = torch.float), torch.tensor(x_, dtype = torch.float), torch.tensor(x_ext_, dtype = torch.float), torch.tensor(m_, dtype = torch.float), torch.tensor(m_ext_, dtype = torch.float), torch.tensor(ms_, dtype = torch.float), torch.tensor(e_, dtype = torch.float), torch.tensor(dur_, dtype = torch.float)))
 		else:
 			# train
-			ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, max_obs_time = utils.pre_process_data(data_train, data_info_dic, max_pred_window = max_pred_window, n_events = n_events, random_seed = random_seed)
+			ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, max_obs_time = utils.pre_process_data(data_train, data_info_dic, max_pred_window = max_pred_window, n_events = n_events, random_seed = random_seed, exclude_samples_wo_pred_window=exclude_samples_wo_pred_window)
 			for id_, x_, m_, ms_, t_, e_, dur_ in zip(ids, x, m, ms, t, e, dur):
 				train_data.append((str(id_), torch.tensor(t_, dtype = torch.float), torch.tensor(x_, dtype = torch.float), torch.tensor(m_, dtype = torch.float), torch.tensor(ms_, dtype = torch.float), torch.tensor(e_, dtype = torch.float), torch.tensor(dur_, dtype = torch.float)))
 				if n_events > 1: train_events.append(e_)
 			# valid
-			ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, _ = utils.pre_process_data(data_valid, data_info_dic, max_pred_window = max_pred_window, n_events = n_events, random_seed = random_seed)
+			ids, x, x_ext, m, m_ext, ms, t, t_ext, e, dur, feat_names, _ = utils.pre_process_data(data_valid, data_info_dic, max_pred_window = max_pred_window, n_events = n_events, random_seed = random_seed, exclude_samples_wo_pred_window=exclude_samples_wo_pred_window)
 			for id_, x_, m_, ms_, t_, e_, dur_ in zip(ids, x, m, ms, t, e, dur):
 				valid_data.append((str(id_), torch.tensor(t_, dtype = torch.float), torch.tensor(x_, dtype = torch.float), torch.tensor(m_, dtype = torch.float), torch.tensor(ms_, dtype = torch.float), torch.tensor(e_, dtype = torch.float), torch.tensor(dur_, dtype = torch.float)))
 

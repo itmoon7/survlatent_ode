@@ -158,7 +158,7 @@ class LatentODESub(LatentODE):
 			lr=1e-2, max_pred_window=None, n_samples=None, run_id=None, surv_loss_scale=10,
 			n_latent_traj=1, early_stopping=False, survival_loss_exp=True, train_info=None,
 			feat_reconstr=None, check_extrapolation=False, wait_until_full_surv_loss=15,
-			dataset='general', random_seed=0):
+			dataset='general', exclude_samples_wo_pred_window=True, random_seed=0):
 		# check extrapolation
 		self.check_extrapolation = check_extrapolation
 		self.dataset = dataset
@@ -194,7 +194,8 @@ class LatentODESub(LatentODE):
 																		max_pred_window=max_pred_window,
 																		n_events=self.n_events,
 																		random_seed=self.random_seed,
-																		param_dics=param_dics
+																		param_dics=param_dics,
+																		exclude_samples_wo_pred_window=exclude_samples_wo_pred_window,
 																		)
 		
 		batch_dict_valid = utils.remove_timepoints_wo_obs(utils.get_next_batch(data_obj["valid_dataloader"]))
@@ -293,8 +294,8 @@ class LatentODESub(LatentODE):
 		last_observed_points = [] # auxiliary info for plotting
 		num_samples = len(batch_dict['sample_ids'])
 		for j in range(num_samples):
-			last_observed_point = (batch_dict['observed_tp_unnorm']
-				[batch_dict['observed_mask'][j].sum(axis = 1) > 0][-1])
+			last_observed_point = (batch_dict['observed_tp_unnorm_dec']
+			                       [batch_dict['observed_mask'][j].sum(axis = 1) > 0][-1])
 			last_observed_points.append(last_observed_point)
 
 		if n_latent_traj > 1:
@@ -302,10 +303,11 @@ class LatentODESub(LatentODE):
 			Use Welford online algorithm to compute variance
 			"""
 			for i in tqdm(range(n_latent_traj), desc = 'getting ' + str(n_latent_traj) + ' trajectroies...'):
-				pred_y, _, info = self.get_reconstruction_survival(batch_dict["tp_to_predict"], 
-																batch_dict["observed_data"],
-																batch_dict["observed_tp"], 
-																mask = batch_dict["observed_mask"])
+				pred_y, _, info = self.get_reconstruction_survival(batch_dict["tp_to_predict"],
+				                                                   batch_dict["observed_data"],
+				                                                   batch_dict["observed_tp"],
+				                                                   batch_dict["end_of_obs_idx"],
+				                                                   mask=batch_dict["observed_mask"])
 				
 				pred_y_curr = pred_y[0].detach().numpy()
 				if i == 0:
@@ -325,9 +327,10 @@ class LatentODESub(LatentODE):
 			return pred_y_avg, pred_y_var
 		else:
 			pred_y, _, info = self.get_reconstruction_survival(batch_dict["tp_to_predict"],
-																batch_dict["observed_data"],
-																batch_dict["observed_tp"],
-																mask = batch_dict["observed_mask"])
+			                                                   batch_dict["observed_data"],
+			                                                   batch_dict["observed_tp"],
+			                                                   batch_dict["end_of_obs_idx"],
+			                                                   mask=batch_dict["observed_mask"])
 			return pred_y 
 
 class SurvLatentODE_Cox(LatentODESub):
