@@ -208,6 +208,39 @@ class LatentODESub(LatentODE):
 							   n_events=self.n_events, wait_until_full_surv_loss=wait_until_full_surv_loss)
 		return
 
+	def get_latent_traj(self, batch_dict, test_batch_size=200, latent_harzard_time_window=365):
+		"""
+		Returns latent trajectory for the main event (i.e., event 1)
+		[TODO]: create a function to get reconstruction, hazard, and latent states and 
+		store them as class variables.
+		"""
+		last_observed_points = batch_dict['end_of_obs_idx'] # auxiliary info for plotting
+		num_samples = len(batch_dict['sample_ids'])
+	
+		batch_total_observed_data = utils.divide_list(batch_dict["observed_data"], test_batch_size)
+		batch_total_observed_mask = utils.divide_list(batch_dict["observed_mask"], test_batch_size)
+		batch_total_end_obs_idx = utils.divide_list(batch_dict["end_of_obs_idx"], test_batch_size)
+		
+		init_flag = True; count = 0;
+		for i in range(len(batch_total_observed_data)):
+			(_, _, info) = self.get_reconstruction_survival(
+								batch_dict["tp_to_predict"],
+								batch_total_observed_data[i],
+								batch_dict["observed_tp"],
+								batch_total_end_obs_idx[i],
+								mask=batch_total_observed_mask[i],
+								get_latent_hazard=True,
+								temporal_encoding=self.temporal_encoding,
+								latent_harzard_time_window=latent_harzard_time_window
+								)
+			latent_states = info['latent_hazard']
+			if init_flag:
+				init_flag = False
+			else:
+				latent_states = prev_latent_states + latent_states
+			prev_latent_states = latent_states
+		return latent_states
+
 	def get_surv_prob(self, batch_dict, model_info=None, max_pred_window=None, filename_suffix=None,
 					  device=None, test_batch_size=200, reconstr_loss=False, n_events=1):
 		
@@ -220,31 +253,24 @@ class LatentODESub(LatentODE):
 		
 		init_flag = True; count = 0;
 		for i in range(len(batch_total_observed_data)):
-			(pred_y_,
-				hazards_y,
-				info) = self.get_reconstruction_survival(
+			(pred_y_, hazards_y, _) = self.get_reconstruction_survival(
 								batch_dict["tp_to_predict"],
 								batch_total_observed_data[i],
 								batch_dict["observed_tp"],
 								batch_total_end_obs_idx[i],
 								mask=batch_total_observed_mask[i],
-								get_latent_hazard=True,
 								temporal_encoding=self.temporal_encoding
 								)
-			latent_states = info['latent_hazard']
 			if init_flag:
 				init_flag = False
 			else:
 				hazards_y = torch.cat((prev_hazards_y, hazards_y), 1)
 				pred_y_ = torch.cat((prev_pred_y, pred_y_), 1)
-				latent_states = prev_latent_states + latent_states
 			prev_pred_y = pred_y_.detach()
-			prev_latent_states = latent_states
 			prev_hazards_y = hazards_y.detach()	
 		
 		pred_y = pred_y_[:, :, :batch_dict["max_end_of_obs_idx"] + 1, :] #, pred_y[:, :, batch_dict["max_end_of_obs_idx"]:, :]
 		pred_y = torch.index_select(pred_y, 2, batch_dict['observed_tp_unnorm_dec'].int())#[:, :, batch_dict['non_missing_tp_pred'], :] 
-		
 		if n_events == 1:
 			surv_prob = self._get_surv_prob(hazards_y, batch_dict, last_observed_points,
 											max_pred_window=max_pred_window,

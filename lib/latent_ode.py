@@ -316,7 +316,8 @@ class LatentODE(nn.Module):
 	def get_reconstruction_survival(self, time_steps_to_predict, truth, truth_time_steps,
 									end_of_obs_idx, mask=None, n_latent_traj=1, run_backwards=True,
 									eps=1e-7, get_multiple_traj=False, test_batch_size=100,
-									get_latent_hazard=False, temporal_encoding=False):
+									get_latent_hazard=False, temporal_encoding=False,
+									latent_harzard_time_window=365):
 
 		if isinstance(self.encoder_z0, Encoder_z0_ODE_RNN) or \
 			isinstance(self.encoder_z0, Encoder_z0_RNN):
@@ -370,14 +371,16 @@ class LatentODE(nn.Module):
 						last_obs_idx_oi = int(last_obs_idx.cpu().numpy())
 					except:
 						last_obs_idx_oi = int(last_obs_idx)#.cpu().numpy())
-					latent_hazard_main_event.append(hazard_per_sample[last_obs_idx_oi:last_obs_idx_oi + 365, :].numpy()) 
+					latent_hazard_main_event.append(hazard_per_sample[last_obs_idx_oi:last_obs_idx_oi+
+					                                latent_harzard_time_window, :].numpy()) 
 			else:	
 				for hazard_per_sample, last_obs_idx in zip(latent_hazard[0], end_of_obs_idx):
 					try:
 						last_obs_idx_oi = int(last_obs_idx.cpu().numpy())
 					except:
 						last_obs_idx_oi = int(last_obs_idx)#.cpu().numpy())
-					latent_hazard_main_event.append(hazard_per_sample[last_obs_idx_oi:last_obs_idx_oi + 365, :].numpy()) 
+					latent_hazard_main_event.append(hazard_per_sample[last_obs_idx_oi:last_obs_idx_oi+
+					                                latent_harzard_time_window, :].numpy()) 
 		all_extra_info = {
 			"first_point": (first_point_mu, first_point_std, first_point_enc),
 			"latent_traj": sol_y.cpu().detach(),
